@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 
+const dicomService = require('./dicomService');
 const app = express();
 const PORT = process.env.PORT;
 const CORS_ORIGIN = process.env.CORS_ORIGIN;
@@ -118,7 +119,24 @@ app.post('/api/xray-report', async (req, res) => {
     const { sql, params } = buildXrayReportQuery(dateback, include, exclude, confirmFlag, existingXNs, xns_NN, xns_YN, xns_NY);
 
     const result = await pool.query(sql, params);
-    res.json({ success: true, count: result.rowCount, data: result.rows });
+    
+    const records = result.rows;
+    if (records.length > 0) {
+      for (const record of records) {
+      try {
+        // ถ้าสถานะเป็น Y, Y ให้ลบไฟล์ทิ้ง
+        if (record.confirm === 'Y' && record.confirm_read_film === 'Y') {
+          dicomService.deleteWorklistFile(record.xn);
+        } else {
+          // ถ้ายังไม่เป็น Y, Y ถึงจะสร้างไฟล์
+          await dicomService.generateWorklistFile(record);
+        }
+      } catch (err) {
+          console.error(`[DICOM Error] ---> ผิดพลาดในการสร้างไฟล์ XN: ${record.xn}`, err);
+        }
+      }
+    }
+    res.json({ success: true, count: result.rowCount, data: records });
   } catch (err) {
     console.error('Query error:', err);
     res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูล', error: err.message });
