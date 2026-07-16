@@ -153,6 +153,7 @@ app.post('/api/xray-report', async (req, res) => {
   } catch (err) {
     console.error('Query error:', err);
     res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูล', error: err.message });
+  } finally {
     isProcessingXrayReport = false;
   }
 });
