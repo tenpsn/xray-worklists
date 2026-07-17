@@ -5,22 +5,22 @@ const { exec } = require('child_process');
 const romanizeModule = require('@dehoist/romanize-thai');
 const romanize = typeof romanizeModule === 'function' ? romanizeModule : romanizeModule.default;
 
-// คำนำหน้าของแพทย์/ผู้ป่วยที่ไม่ต้องแปลงเป็นคาราโอเกะ (เก็บไว้เป็นภาษาไทยเสมอ)
+// คำนำหน้าของแพทย์/ผู้ป่วยที่ไม่ต้องแปลงเป็นอังกฤษ
 const PREFIX_PATTERN = /^(พญ|นพ|นางสาว|นาง|นาย|ดร|ผศ|รศ|ศ|น\.ส)\.?\s*/;
 
-// แปลงข้อความไทยเป็นคาราโอเกะ (ภาษาอังกฤษ) แบบปลอดภัย ถ้าแปลงไม่ได้ให้คืนค่าเดิม ไม่ทำให้ระบบล่ม
+// แปลงข้อความไทยเป็นอังกฤษถ้าแปลงไม่ได้ให้คืนค่าเดิม
 function safeRomanize(text) {
   if (!text) return '';
   try {
     return romanize(String(text));
   } catch (err) {
-    console.warn('[DICOM Service] ---> แปลงคาราโอเกะไม่สำเร็จ ใช้ข้อความเดิมแทน:', err.message);
+    console.warn('[DICOM Service] ---> แปลงอังกฤษไม่สำเร็จ ใช้ข้อความเดิมแทน:', err.message);
     return String(text);
   }
 }
 
-// สำหรับชื่อแพทย์ที่มีคำนำหน้าติดอยู่ในสตริงเดียวกัน เช่น "พญ.พิมพ์ชนก คำเพชร"
-// -> ตัดคำนำหน้าออกก่อน ไม่ให้ถูกแปลงเป็นคาราโอเกะไปด้วย แล้วต่อกลับด้วยภาษาไทยเหมือนเดิม
+// สำหรับชื่อแพทย์ที่มีคำนำหน้าติดอยู่ในสตริงเดียวกัน เช่น พญ.พิมพ์ชนก
+// -> ตัดคำนำหน้าออกก่อน ไม่ให้ถูกแปลงเป็นอังกฤษไปด้วย แล้วต่อกลับด้วยภาษาไทยเหมือนเดิม
 function romanizeDoctorName(text) {
   const str = String(text || '');
   const match = str.match(PREFIX_PATTERN);
@@ -32,11 +32,32 @@ function romanizeDoctorName(text) {
   return romanizedRest ? `${prefix} ${romanizedRest}`.trim() : prefix;
 }
 
-// กำหนด Path ของโฟลเดอร์ worklists ภายในโฟลเดอร์ backend
+// สร้าง StudyInstanceUID ที่ปลอดภัยและถูกต้องตามมาตรฐาน DICOM
+function generateStudyInstanceUID() {
+  const uuid = crypto.randomUUID(); // เช่น '3f2504e0-4f89-41d3-9a0c-0305e82c3301'
+  const hex = uuid.replace(/-/g, ''); // 32 ตัวอักษร hex = 128 บิต
+  const decimal = BigInt('0x' + hex).toString(10);
+  return `2.25.${decimal}`;
+}
+
+// StudyInstanceUID ต้องคงที่ตลอดอายุของ 1 accession number
+// จึงต้องเก็บไว้ใน state แล้วใช้ตัวเดิมซ้ำ ถ้ายังไม่เคยมีให้สุ่มสร้างใหม่ครั้งเดียว
+function getOrCreateStudyInstanceUID(accessionNumber) {
+  const existingEntry = worklistState[accessionNumber];
+  if (existingEntry && typeof existingEntry === 'object' && existingEntry.studyInstanceUID) {
+    return existingEntry.studyInstanceUID;
+  }
+  return generateStudyInstanceUID();
+}
+
+// ฟังก์ชันตรวจสอบ hash ของข้อมูลล่าสุดที่สร้างไฟล์ว่าข้อมูลเปลี่ยนไปจากตอนสร้างไฟล์ครั้งล่าสุดหรือไม่ ถ้าไม่เปลี่ยน จะได้ข้ามไป
+function getPreviousHash(accessionNumber) {
+  const entry = worklistState[accessionNumber];
+  if (entry && typeof entry === 'object') return entry.hash;
+  return entry; // รูปแบบเก่า: เก็บ hash เป็น string ตรงๆ
+}
 const WORKLIST_DIR = path.join(__dirname, 'worklists');
 
-// ไฟล์เก็บ state (hash ของข้อมูลล่าสุดที่สร้างไฟล์ไปแล้ว ต่อ 1 accession number)
-// ใช้เทียบว่าข้อมูลเปลี่ยนไปจากตอนสร้างไฟล์ครั้งล่าสุดหรือไม่ ถ้าไม่เปลี่ยน จะได้ข้ามไป
 const STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
 
 // ตรวจสอบว่ามีโฟลเดอร์ worklists หรือยัง ถ้ายังไม่มีให้สร้างขึ้นมา
@@ -126,7 +147,7 @@ async function generateWorklistFile(item) {
       const patientId = item.hn || 'UNKNOWN';
       const useEnglish = item.lang === 'en';
 
-      // ถ้าเลือกภาษาอังกฤษ ให้แปลงชื่อ-นามสกุลผู้ป่วยเป็นคาราโอเกะ / ชื่อแพทย์ (คงคำนำหน้าไทยไว้)
+      // ถ้าเลือกภาษาอังกฤษ ให้แปลงชื่อ-นามสกุลผู้ป่วยเป็นอังกฤษ / ชื่อแพทย์ คงคำนำหน้าไทยไว้
       const firstName = useEnglish ? safeRomanize(item.fname) : (item.fname || '');
       const lastName = useEnglish ? safeRomanize(item.lname) : (item.lname || '');
       const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
@@ -134,12 +155,18 @@ async function generateWorklistFile(item) {
       // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
       const patientName = `${lastName}^${firstName}`;
 
+      // รหัสรายการ (xray_items_code) ใช้ทั้งใน RequestedProcedureID และ ScheduledProtocolCodeSequence>CodeValue
+      const procedureCode = item.xray_items_code || '';
+
+      // StudyInstanceUID ต้องคงที่ตลอดอายุของรายการนี้ (ไม่สุ่มใหม่ทุกครั้งที่อัพเดทไฟล์)
+      const studyInstanceUID = getOrCreateStudyInstanceUID(accessionNumber);
+
       const wlFileNameCheck = `${accessionNumber}.wl`;
       const wlFilePathCheck = path.join(WORKLIST_DIR, wlFileNameCheck);
 
       // เทียบ hash ของข้อมูลกับครั้งล่าสุดที่สร้างไฟล์ ถ้าไม่เปลี่ยนและไฟล์ .wl ยังอยู่ครบ -> ข้าม ไม่ต้องสร้างซ้ำ
       const currentHash = computeItemHash(item);
-      const previousHash = worklistState[accessionNumber];
+      const previousHash = getPreviousHash(accessionNumber);
       if (previousHash === currentHash && fs.existsSync(wlFilePathCheck)) {
         console.log(`[DICOM Service] ---> ข้ามไฟล์ (ไม่มีการเปลี่ยนแปลง): ${wlFilePathCheck}`);
         return resolve({ success: true, file: wlFilePathCheck, skipped: true });
@@ -158,7 +185,9 @@ async function generateWorklistFile(item) {
 (0010,0020) LO [${patientId}] # Patient ID
 (0010,0030) DA [${dob}] # Patient Birth Date
 (0010,0040) CS [${sex}] # Patient Sex
+(0020,000D) UI [${studyInstanceUID}] # Study Instance UID
 (0032,1060) LO [${item.xraylist || ''}] # Requested Procedure Description
+(0040,1001) SH [${procedureCode}] # Requested Procedure ID
 (0040,0100) SQ
   (FFFE,E000) na
     (0040,0001) AE [ORTHANC] # Scheduled Station AE Title
@@ -168,6 +197,11 @@ async function generateWorklistFile(item) {
     (0040,0006) PN [${doctorName}] # Scheduled Performing Physician's Name
     (0008,1030) LO [${item.xraylist || ''}]
     (0040,0007) LO [${item.xraylist || ''}]
+    (0040,0008) SQ
+      (FFFE,E000) na
+        (0008,0100) SH [${procedureCode}] # Scheduled Protocol Code Value
+      (FFFE,E00D) na
+    (FFFE,E0DD) na
   (FFFE,E00D) na
 (FFFE,E0DD) na
       `.trim();
@@ -196,8 +230,9 @@ async function generateWorklistFile(item) {
           // ลบไฟล์ .dump ทิ้งเมื่อสร้าง .wl สำเร็จ
           safeDeleteDumpFile(dumpFilePath);
 
-          // บันทึก hash ของข้อมูลชุดนี้ไว้ ครั้งหน้าถ้าข้อมูลไม่เปลี่ยนจะได้ข้ามได้
-          worklistState[accessionNumber] = currentHash;
+          // บันทึก hash + StudyInstanceUID ของข้อมูลชุดนี้ไว้ ครั้งหน้าถ้าข้อมูลไม่เปลี่ยนจะได้ข้ามได้
+          // และใช้ StudyInstanceUID เดิมซ้ำ ไม่สุ่มใหม่ทุกครั้ง
+          worklistState[accessionNumber] = { hash: currentHash, studyInstanceUID };
           saveState();
 
           console.log(`[DICOM Service] ---> สร้าง/อัพเดทไฟล์ Worklist สำเร็จ: ${wlFilePath}`);
