@@ -1,0 +1,15 @@
+{
+  "his": {
+    "dbType": "postgres",
+    "host": "localhost",
+    "port": "5433",
+    "database": "phu_hosxe",
+    "username": "xray_pac",
+    "password": "xray_pac",
+    "encoding": "UTF8"
+  },
+  "mwl": {
+    "aet": "ORTHANC",
+    "port": "7000"
+  }
+}

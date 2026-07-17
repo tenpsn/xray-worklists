@@ -145,7 +145,10 @@ export default function Page() {
 
   return (
     <>
-      <h1>รายงานผล X-ray</h1>
+      <div className="page-header">
+        <h1>รายงานผล X-ray</h1>
+        <a className="settings-link" href="/settings">ตั้งค่าระบบ</a>
+      </div>
 
       <div className="filters">
         <label>
@@ -177,12 +180,12 @@ export default function Page() {
           />
         </label>
         <label className="checkbox-group">
-          เฉพาะที่ยังไม่ยืนยัน (confirm = N)
           <input
             type="checkbox"
             checked={confirm}
             onChange={(e) => setConfirm(e.target.checked)}
           />
+          เฉพาะที่ยังไม่ยืนยัน (confirm = N)
         </label>
         <button onClick={() => loadData(true)}>ค้นหา</button>
       </div>

@@ -1,9 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
 
 const dicomService = require('./dicomService');
+const settingsService = require('./settingsService');
+const db = require('./db');
+
 const app = express();
 const PORT = process.env.PORT;
 const CORS_ORIGIN = process.env.CORS_ORIGIN;
@@ -14,15 +16,9 @@ app.use(cors({ origin: CORS_ORIGIN }));
 // รับข้อมูลแบบ JSON
 app.use(express.json());
 
-const dbConfig = {
-  host: process.env.PGHOST,
-  port: process.env.PGPORT,
-  database: process.env.PGDATABASE,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-};
-
-const pool = new Pool(dbConfig);
+// โหลดการตั้งค่า (HIS DB + MWL) แล้วเปิด connection pool ตั้งแต่ตอนสตาร์ทเซิร์ฟเวอร์
+let currentSettings = settingsService.loadSettings();
+db.initPool(currentSettings);
 
 process.on('uncaughtException', (err) => {
   console.error('[Server] ---> Uncaught Exception (ไม่ล่มแต่ต้องรีบดูสาเหตุ):', err);
@@ -31,12 +27,17 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Server] ---> Unhandled Rejection (ไม่ล่มแต่ต้องรีบดูสาเหตุ):', reason);
 });
 
-// เพิ่ม parameter รับอาร์เรย์แต่ละสถานะเข้ามา
-function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs = [], xns_NN = [], xns_YN = [], xns_NY = []) {
+// เพิ่ม parameter รับอาร์เรย์แต่ละสถานะเข้ามา + dbType (postgres/mysql) เพื่อสลับ syntax วันที่ให้ถูกต้อง
+function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs = [], xns_NN = [], xns_YN = [], xns_NY = [], dbType = 'postgres') {
   const params = [];
   let paramIndex = 1;
 
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 0;
+
+  // เงื่อนไขช่วงวันที่ ต่างกันระหว่าง Postgres กับ MySQL
+  const dateFilter = dbType === 'mysql'
+    ? `a.request_date BETWEEN DATE_SUB(CURDATE(), INTERVAL $${paramIndex} DAY) AND CURDATE()`
+    : `a.request_date BETWEEN current_date - $${paramIndex}::integer AND current_date`;
 
   let sql = `
     SELECT 
@@ -50,7 +51,7 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
       LEFT JOIN xray_items c ON a.xray_items_code = c.xray_items_code
       INNER JOIN doctor d ON a.request_doctor = d.code
       LEFT JOIN xray_head h ON a.vn = h.vn
-    WHERE a.request_date BETWEEN current_date - $${paramIndex}::integer AND current_date
+    WHERE ${dateFilter}
   `;
 
   params.push(safeDateback);
@@ -116,6 +117,44 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// ----- Settings API (หน้า Settings ในรูป: HIS DB + MWL) -----
+
+app.get('/api/settings', (req, res) => {
+  // ไม่ส่งรหัสผ่านจริงกลับไปแสดงตรงๆ ในทางที่ปลอดภัยกว่า แต่เพื่อความสะดวกในการแก้ไขค่าเดิม
+  // (เป็นระบบใช้งานภายในโรงพยาบาล ไม่เปิดสู่อินเทอร์เน็ต) จึงส่งค่าจริงกลับไปให้แก้ไขได้
+  res.json({ success: true, settings: currentSettings });
+});
+
+app.post('/api/settings', async (req, res) => {
+  try {
+    const { his, mwl } = req.body;
+    currentSettings = settingsService.saveSettings({ his, mwl });
+    db.initPool(currentSettings);
+
+    // ทดสอบว่าต่อฐานข้อมูลได้จริงหรือไม่ หลังบันทึกค่าใหม่
+    try {
+      await db.query('SELECT 1');
+      res.json({
+        success: true,
+        settings: currentSettings,
+        message: 'บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ',
+      });
+    } catch (dbErr) {
+      console.error('[Settings] ---> เชื่อมต่อฐานข้อมูลไม่สำเร็จหลังบันทึกค่าใหม่:', dbErr);
+      const friendlyMessage = db.friendlyErrorMessage(dbErr);
+      res.json({
+        success: false,
+        settings: currentSettings,
+        message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}`,
+        error: dbErr.message,
+      });
+    }
+  } catch (err) {
+    console.error('[Settings] ---> บันทึกไม่สำเร็จ:', err);
+    res.status(500).json({ success: false, message: 'บันทึกการตั้งค่าไม่สำเร็จ', error: err.message });
+  }
+});
+
 let isProcessingXrayReport = false;
 
 app.post('/api/xray-report', async (req, res) => {
@@ -128,10 +167,14 @@ app.post('/api/xray-report', async (req, res) => {
     const { dateback = 1, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
     const confirmFlag = confirm === true || confirm === 'true' || confirm === '1';
 
-    // ส่งค่าทั้งหมดเข้าไปในฟังก์ชันสร้าง SQL
-    const { sql, params } = buildXrayReportQuery(dateback, include, exclude, confirmFlag, existingXNs, xns_NN, xns_YN, xns_NY);
+    // ส่งค่าทั้งหมดเข้าไปในฟังก์ชันสร้าง SQL (พร้อม dbType ปัจจุบัน)
+    const { sql, params } = buildXrayReportQuery(
+      dateback, include, exclude, confirmFlag,
+      existingXNs, xns_NN, xns_YN, xns_NY,
+      currentSettings.his.dbType
+    );
 
-    const result = await pool.query(sql, params);
+    const result = await db.query(sql, params);
     
     const records = result.rows;
     if (records.length > 0) {
@@ -152,7 +195,8 @@ app.post('/api/xray-report', async (req, res) => {
     res.json({ success: true, count: result.rowCount, data: records });
   } catch (err) {
     console.error('Query error:', err);
-    res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาดในการดึงข้อมูล', error: err.message });
+    const friendlyMessage = db.friendlyErrorMessage(err);
+    res.status(500).json({ success: false, message: friendlyMessage, error: err.message });
   } finally {
     isProcessingXrayReport = false;
   }
