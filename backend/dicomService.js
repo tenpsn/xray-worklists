@@ -2,6 +2,35 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
+const romanizeModule = require('@dehoist/romanize-thai');
+const romanize = typeof romanizeModule === 'function' ? romanizeModule : romanizeModule.default;
+
+// คำนำหน้าของแพทย์/ผู้ป่วยที่ไม่ต้องแปลงเป็นคาราโอเกะ (เก็บไว้เป็นภาษาไทยเสมอ)
+const PREFIX_PATTERN = /^(พญ|นพ|นางสาว|นาง|นาย|ดร|ผศ|รศ|ศ|น\.ส)\.?\s*/;
+
+// แปลงข้อความไทยเป็นคาราโอเกะ (ภาษาอังกฤษ) แบบปลอดภัย ถ้าแปลงไม่ได้ให้คืนค่าเดิม ไม่ทำให้ระบบล่ม
+function safeRomanize(text) {
+  if (!text) return '';
+  try {
+    return romanize(String(text));
+  } catch (err) {
+    console.warn('[DICOM Service] ---> แปลงคาราโอเกะไม่สำเร็จ ใช้ข้อความเดิมแทน:', err.message);
+    return String(text);
+  }
+}
+
+// สำหรับชื่อแพทย์ที่มีคำนำหน้าติดอยู่ในสตริงเดียวกัน เช่น "พญ.พิมพ์ชนก คำเพชร"
+// -> ตัดคำนำหน้าออกก่อน ไม่ให้ถูกแปลงเป็นคาราโอเกะไปด้วย แล้วต่อกลับด้วยภาษาไทยเหมือนเดิม
+function romanizeDoctorName(text) {
+  const str = String(text || '');
+  const match = str.match(PREFIX_PATTERN);
+  if (!match) return safeRomanize(str);
+
+  const prefix = match[0].trim();
+  const rest = str.slice(match[0].length);
+  const romanizedRest = safeRomanize(rest);
+  return romanizedRest ? `${prefix} ${romanizedRest}`.trim() : prefix;
+}
 
 // กำหนด Path ของโฟลเดอร์ worklists ภายในโฟลเดอร์ backend
 const WORKLIST_DIR = path.join(__dirname, 'worklists');
@@ -49,6 +78,7 @@ function computeItemHash(item) {
     Modality: item.Modality,
     Doctor: item.Doctor,
     xraylist: item.xraylist,
+    lang: item.lang === 'en' ? 'en' : 'th',
   };
   return crypto.createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
 }
@@ -94,8 +124,15 @@ async function generateWorklistFile(item) {
     try {
       const accessionNumber = item.xn || `XN${Date.now()}`;
       const patientId = item.hn || 'UNKNOWN';
+      const useEnglish = item.lang === 'en';
+
+      // ถ้าเลือกภาษาอังกฤษ ให้แปลงชื่อ-นามสกุลผู้ป่วยเป็นคาราโอเกะ / ชื่อแพทย์ (คงคำนำหน้าไทยไว้)
+      const firstName = useEnglish ? safeRomanize(item.fname) : (item.fname || '');
+      const lastName = useEnglish ? safeRomanize(item.lname) : (item.lname || '');
+      const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
+
       // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
-      const patientName = `${item.lname || ''}^${item.fname || ''}`;
+      const patientName = `${lastName}^${firstName}`;
 
       const wlFileNameCheck = `${accessionNumber}.wl`;
       const wlFilePathCheck = path.join(WORKLIST_DIR, wlFileNameCheck);
@@ -128,7 +165,7 @@ async function generateWorklistFile(item) {
     (0040,0002) DA [${studyDate}] # Scheduled Procedure Step Start Date
     (0040,0003) TM [${studyTime}] # Scheduled Procedure Step Start Time
     (0008,0060) CS [${item.Modality || 'CR'}] # Modality
-    (0040,0006) PN [${item.Doctor || ''}] # Scheduled Performing Physician's Name
+    (0040,0006) PN [${doctorName}] # Scheduled Performing Physician's Name
     (0008,1030) LO [${item.xraylist || ''}]
     (0040,0007) LO [${item.xraylist || ''}]
   (FFFE,E00D) na

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { formatNameField, formatPrefixField, formatDoctorField } from './lib/nameDisplay';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -11,10 +12,12 @@ export default function Page() {
   const [confirm, setConfirm] = useState(false);
   const [rows, setRows] = useState([]);
   const [status, setStatus] = useState('กำลังโหลดข้อมูล...');
+  const [lang, setLang] = useState('th'); // 'th' = ภาษาไทยล้วน, 'en' = ไทย + คาราโอเกะ
 
   // ใช้ Map เพื่อเก็บ XN พร้อมสถานะล่าสุด เช่น { "123": { confirm: "N", confirm_read_film: "N" } }
   const loadedXNsMap = useRef(new Map());
   const intervalRef = useRef(null);
+  const isFirstLangRender = useRef(true);
 
   async function loadData(isManual = false) {
     if (isManual) {
@@ -44,6 +47,7 @@ export default function Page() {
       include,
       exclude,
       confirm,
+      lang,
       existingXNs,
       xns_NN,
       xns_YN,
@@ -143,11 +147,40 @@ export default function Page() {
     };
   }, []);
 
+  // ปุ่มเปลี่ยนภาษาแค่เปลี่ยนการแสดงผลของแถวที่โหลดมาแล้วเฉยๆ ไม่ได้ยิง request ใหม่
+  // แต่ไฟล์ .wl ถูกสร้างที่ backend ตอนดึงข้อมูล จึงต้อง "ค้นหา" ใหม่ทุกครั้งที่สลับภาษา
+  // เพื่อให้ backend สร้างไฟล์ .wl ด้วยภาษาที่เพิ่งเลือกจริงๆ
+  useEffect(() => {
+    if (isFirstLangRender.current) {
+      isFirstLangRender.current = false;
+      return;
+    }
+    loadDataRef.current(true);
+  }, [lang]);
+
   return (
     <>
       <div className="page-header">
         <h1>รายงานผล X-ray</h1>
-        <a className="settings-link" href="/settings">ตั้งค่าระบบ</a>
+        <div className="header-actions">
+          <div className="lang-toggle">
+            <button
+              type="button"
+              className={lang === 'th' ? 'active' : ''}
+              onClick={() => setLang('th')}
+            >
+              ไทย
+            </button>
+            <button
+              type="button"
+              className={lang === 'en' ? 'active' : ''}
+              onClick={() => setLang('en')}
+            >
+              English
+            </button>
+          </div>
+          <a className="settings-link" href="/settings">ตั้งค่าระบบ</a>
+        </div>
       </div>
 
       <div className="filters">
@@ -180,12 +213,12 @@ export default function Page() {
           />
         </label>
         <label className="checkbox-group">
+          เฉพาะที่ยังไม่ยืนยัน (confirm = N)
           <input
             type="checkbox"
             checked={confirm}
             onChange={(e) => setConfirm(e.target.checked)}
           />
-          เฉพาะที่ยังไม่ยืนยัน (confirm = N)
         </label>
         <button onClick={() => loadData(true)}>ค้นหา</button>
       </div>
@@ -221,9 +254,9 @@ export default function Page() {
                 <td>{row.xn ?? ''}</td>
                 <td>{row.hn ?? ''}</td>
                 <td>{row.cid ?? ''}</td>
-                <td>{row.pname ?? ''}</td>
-                <td>{row.fname ?? ''}</td>
-                <td>{row.lname ?? ''}</td>
+                <td>{formatPrefixField(row.pname)}</td>
+                <td>{formatNameField(row.fname, lang)}</td>
+                <td>{formatNameField(row.lname, lang)}</td>
                 <td>{row.birthday ?? ''}</td>
                 <td>{row.sex ?? ''}</td>
                 <td>{row.xraylist ?? ''}</td>
@@ -232,7 +265,7 @@ export default function Page() {
                 <td>{row.xray_items_group ?? ''}</td>
                 <td>{row.confirm ?? ''}</td>
                 <td>{row.confirm_read_film ?? ''}</td>
-                <td>{row.Doctor ?? ''}</td>
+                <td>{formatDoctorField(row.Doctor, lang)}</td>
                 <td>{row.xray_items_code ?? ''}</td>
                 <td>{row.department_name ?? ''}</td>
               </tr>

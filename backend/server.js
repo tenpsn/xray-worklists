@@ -164,8 +164,9 @@ app.post('/api/xray-report', async (req, res) => {
   isProcessingXrayReport = true;
   try {
     // ดึงตัวแปรใหม่ที่ส่งมาจาก Frontend มารับใน req.body
-    const { dateback = 1, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
+    const { dateback = 1, include, exclude, confirm, lang, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
     const confirmFlag = confirm === true || confirm === 'true' || confirm === '1';
+    const displayLang = lang === 'en' ? 'en' : 'th';
 
     // ส่งค่าทั้งหมดเข้าไปในฟังก์ชันสร้าง SQL (พร้อม dbType ปัจจุบัน)
     const { sql, params } = buildXrayReportQuery(
@@ -180,6 +181,9 @@ app.post('/api/xray-report', async (req, res) => {
     if (records.length > 0) {
       for (const record of records) {
       try {
+        // แนบภาษาที่หน้าเว็บเลือกไว้ (th/en) ไปกับ record เพื่อให้ dicomService รู้ว่าต้องแปลงชื่อเป็นคาราโอเกะหรือไม่
+        record.lang = displayLang;
+
         // ถ้าสถานะเป็น Y, Y ให้ลบไฟล์ทิ้ง
         if (record.confirm === 'Y' && record.confirm_read_film === 'Y') {
           dicomService.deleteWorklistFile(record.xn);

@@ -108,6 +108,37 @@ tbody tr:hover {
   margin-bottom: 24px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lang-toggle {
+  display: flex;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.lang-toggle button {
+  background: white;
+  color: #2563eb;
+  border: none;
+  border-radius: 0;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.lang-toggle button:hover {
+  background: #eff4ff;
+}
+
+.lang-toggle button.active {
+  background: #2563eb;
+  color: white;
+}
+
 .settings-link {
   font-size: 13px;
   color: #2563eb;
