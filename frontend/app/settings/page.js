@@ -17,6 +17,7 @@ const DEFAULT_FORM = {
   mwl: {
     aet: '',
     port: '7000',
+    mppsPort: '7001',
   },
 };
 
@@ -180,6 +181,16 @@ export default function SettingsPage() {
               placeholder="เช่น 7000"
               value={form.mwl.port}
               onChange={(e) => updateMwl('port', e.target.value)}
+            />
+          </label>
+
+          <label>
+            MPPS Port
+            <input
+              type="text"
+              placeholder="เช่น 7001"
+              value={form.mwl.mppsPort}
+              onChange={(e) => updateMwl('mppsPort', e.target.value)}
             />
           </label>
         </div>

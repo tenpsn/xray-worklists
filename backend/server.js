@@ -5,6 +5,7 @@ const cors = require('cors');
 const dicomService = require('./dicomService');
 const settingsService = require('./settingsService');
 const db = require('./db');
+const mppsService = require('./mppsService');
 
 const app = express();
 const PORT = process.env.PORT;
@@ -20,11 +21,30 @@ app.use(express.json());
 let currentSettings = settingsService.loadSettings();
 db.initPool(currentSettings);
 
+// เมื่อเครื่อง Modality ส่งสถานะ MPPS กลับมา (ตรวจเสร็จ/ยกเลิก) ให้ลบไฟล์ worklist (.wl) ทิ้ง
+// เพื่อไม่ให้เครื่องดึงรายการเดิมไปทำซ้ำอีก (ไม่ได้ไปแก้สถานะใน HIS DB ให้ ยังต้องยืนยันผลที่ HIS ตามปกติ)
+function handleMppsStatusChange(accessionNumber, status) {
+  if (status === 'COMPLETED' || status === 'DISCONTINUED') {
+    dicomService.deleteWorklistFile(accessionNumber);
+    console.log(`[MPPS] ---> ลบไฟล์ worklist ของ XN: ${accessionNumber} เนื่องจากสถานะเป็น "${status}"`);
+  }
+}
+
+mppsService.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
+
 process.on('uncaughtException', (err) => {
   console.error('[Server] ---> Uncaught Exception (ไม่ล่มแต่ต้องรีบดูสาเหตุ):', err);
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[Server] ---> Unhandled Rejection (ไม่ล่มแต่ต้องรีบดูสาเหตุ):', reason);
+});
+process.on('SIGINT', () => {
+  mppsService.stopMppsServer();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  mppsService.stopMppsServer();
+  process.exit(0);
 });
 
 // เพิ่ม parameter รับอาร์เรย์แต่ละสถานะเข้ามา + dbType (postgres/mysql) เพื่อสลับ syntax วันที่ให้ถูกต้อง
@@ -130,6 +150,7 @@ app.post('/api/settings', async (req, res) => {
     const { his, mwl } = req.body;
     currentSettings = settingsService.saveSettings({ his, mwl });
     db.initPool(currentSettings);
+    mppsService.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
 
     // ทดสอบว่าต่อฐานข้อมูลได้จริงหรือไม่ หลังบันทึกค่าใหม่
     try {

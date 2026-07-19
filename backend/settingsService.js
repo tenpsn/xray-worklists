@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
   mwl: {
     aet: process.env.MWL_AET || 'ORTHANC',
     port: process.env.MWL_PORT || '7000',
+    mppsPort: process.env.MPPS_PORT || '7001', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
   },
 };
 
