@@ -1,0 +1,23 @@
+{
+  "name": "xray-worklists",
+  "version": "1.0.0",
+  "description": "ระบบนี้ทำหน้าที่เป็น **ตัวกลาง** ระหว่างฐานข้อมูล HIS (ระบบโรงพยาบาล เช่น HOSXP) กับเครื่อง X-ray/CT/MRI (เรียกรวมว่า \"เครื่อง Modality\") โดยทำ 2 อย่างหลักๆ:",
+  "main": "ecosystem.config.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tenpsn/xray-worklists.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tenpsn/xray-worklists/issues"
+  },
+  "homepage": "https://github.com/tenpsn/xray-worklists#readme",
+  "dependencies": {
+    "pm2": "^7.0.3"
+  }
+}
