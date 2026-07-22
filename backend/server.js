@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const dicomService = require('./dicomService');
 const settingsService = require('./settingsService');
@@ -10,6 +13,28 @@ const mppsService = require('./mppsService');
 const app = express();
 const PORT = process.env.PORT;
 const CORS_ORIGIN = process.env.CORS_ORIGIN;
+
+// ห้ามส่งค่าจริงกลับไปให้ frontend
+const SECRET_FIELD_REGEX = /(password|passwd|pwd|secret)/i;
+
+// เพื่อป้องกันรหัสผ่านฐานข้อมูล
+function maskSecrets(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => maskSecrets(item));
+  }
+  if (value && typeof value === 'object') {
+    const masked = {};
+    for (const [key, val] of Object.entries(value)) {
+      if (SECRET_FIELD_REGEX.test(key)) {
+        masked[key] = val ? '••••••••' : '';
+      } else {
+        masked[key] = maskSecrets(val);
+      }
+    }
+    return masked;
+  }
+  return value;
+}
 
 // อนุญาตให้ frontend (คนละ port/โดเมน) เรียกเข้ามาได้
 app.use(cors({ origin: CORS_ORIGIN }));
@@ -21,6 +46,13 @@ app.use(express.json());
 let currentSettings = settingsService.loadSettings();
 db.initPool(currentSettings);
 
+// ตั้งค่าโฟลเดอร์เก็บไฟล์ worklist ตามค่าที่บันทึกไว้ (ถ้าไม่ได้ตั้งไว้ จะใช้ backend/worklists เป็นค่า default)
+try {
+  dicomService.setWorklistDir(currentSettings.mwl.worklistDir);
+} catch (err) {
+  console.error('[Server] ---> ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ ใช้โฟลเดอร์เดิมต่อไป:', err.message);
+}
+
 // เมื่อเครื่อง Modality ส่งสถานะ MPPS กลับมา (ตรวจเสร็จ/ยกเลิก) ให้ลบไฟล์ worklist (.wl) ทิ้ง
 // เพื่อไม่ให้เครื่องดึงรายการเดิมไปทำซ้ำอีก (ไม่ได้ไปแก้สถานะใน HIS DB ให้ ยังต้องยืนยันผลที่ HIS ตามปกติ)
 function handleMppsStatusChange(accessionNumber, status) {
@@ -30,13 +62,26 @@ function handleMppsStatusChange(accessionNumber, status) {
   }
 }
 
-mppsService.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
+// เริ่ม MPPS server ตอนสตาร์ท — ถ้าเริ่มไม่สำเร็จ (เช่น port ถูกใช้งานอยู่แล้วจากอีก process ที่รันซ้อนอยู่)
+// ให้ปิดโปรแกรมไปเลยแทนที่จะปล่อยให้รันต่อในสภาพที่ MPPS ใช้งานไม่ได้โดยไม่รู้ตัว
+// (PM2 ตั้ง autorestart: true ไว้แล้ว จะลองสตาร์ทให้ใหม่เอง)
+try {
+  mppsService.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
+} catch (err) {
+  console.error('[Server] ---> เริ่ม MPPS server ไม่สำเร็จตอนสตาร์ท ปิดโปรแกรม:', err.message);
+  process.exit(1);
+}
 
+// หลัง uncaught exception/unhandled rejection เกิดขึ้น ไม่ควรปล่อยให้ process ทำงานต่อ
+// เพราะ state ภายใน (DB pool, DICOM listener ฯลฯ) อาจเพี้ยนไปแล้วโดยไม่รู้ตัว (ตามคำแนะนำของ Node.js เอง)
+// ให้ log ไว้ให้ชัดเจนแล้ว exit(1) ปล่อยให้ PM2 (autorestart: true) เริ่ม process ใหม่แบบสะอาดแทน
 process.on('uncaughtException', (err) => {
-  console.error('[Server] ---> Uncaught Exception (ไม่ล่มแต่ต้องรีบดูสาเหตุ):', err);
+  console.error('[Server] ---> Uncaught Exception (ปิดโปรแกรมเพื่อความปลอดภัย ให้ PM2 restart ใหม่):', err);
+  process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[Server] ---> Unhandled Rejection (ไม่ล่มแต่ต้องรีบดูสาเหตุ):', reason);
+  console.error('[Server] ---> Unhandled Rejection (ปิดโปรแกรมเพื่อความปลอดภัย ให้ PM2 restart ใหม่):', reason);
+  process.exit(1);
 });
 process.on('SIGINT', () => {
   mppsService.stopMppsServer();
@@ -133,40 +178,88 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
   return { sql, params };
 }
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true });
+app.get('/health', async (req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.json({ ok: true, db: 'connected' });
+  } catch (err) {
+    // process ยังทำงานอยู่ (ตอบ HTTP ได้) แต่ต่อฐานข้อมูลไม่ได้ — ถือว่า "ไม่พร้อมใช้งาน" จริง
+    // ให้เครื่องมือ monitor ภายนอกจับได้ ไม่ใช่แค่เช็คว่า process ตายหรือไม่
+    res.status(503).json({ ok: false, db: 'disconnected', error: db.friendlyErrorMessage(err) });
+  }
 });
-
-// ----- Settings API (หน้า Settings ในรูป: HIS DB + MWL) -----
 
 app.get('/api/settings', (req, res) => {
-  // ไม่ส่งรหัสผ่านจริงกลับไปแสดงตรงๆ ในทางที่ปลอดภัยกว่า แต่เพื่อความสะดวกในการแก้ไขค่าเดิม
-  // (เป็นระบบใช้งานภายในโรงพยาบาล ไม่เปิดสู่อินเทอร์เน็ต) จึงส่งค่าจริงกลับไปให้แก้ไขได้
-  res.json({ success: true, settings: currentSettings });
+  res.json({
+    success: true,
+    settings: maskSecrets(currentSettings),
+    worklistDirActive: dicomService.getWorklistDir(), // path จริงที่ใช้งานอยู่ตอนนี้ (เผื่อฟิลด์ว่างไว้แล้วใช้ค่า default)
+  });
 });
+
+function reconcileSecrets(incoming, existing) {
+  if (Array.isArray(incoming)) {
+    return incoming.map((item, i) => reconcileSecrets(item, existing ? existing[i] : undefined));
+  }
+  if (incoming && typeof incoming === 'object') {
+    const result = {};
+    for (const [key, val] of Object.entries(incoming)) {
+      const existingVal = existing ? existing[key] : undefined;
+      if (SECRET_FIELD_REGEX.test(key)) {
+        result[key] = (val === '' || val === '••••••••' || val === undefined) ? existingVal : val;
+      } else {
+        result[key] = reconcileSecrets(val, existingVal);
+      }
+    }
+    return result;
+  }
+  return incoming;
+}
 
 app.post('/api/settings', async (req, res) => {
   try {
     const { his, mwl } = req.body;
-    currentSettings = settingsService.saveSettings({ his, mwl });
+    const reconciledHis = reconcileSecrets(his, currentSettings.his);
+    const reconciledMwl = reconcileSecrets(mwl, currentSettings.mwl);
+
+    currentSettings = settingsService.saveSettings({ his: reconciledHis, mwl: reconciledMwl });
     db.initPool(currentSettings);
-    mppsService.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
+
+    // สลับไปใช้โฟลเดอร์ worklist ใหม่ตามที่ตั้งค่ามา (ถ้าตั้งไม่สำเร็จ เช่น path ผิด/ไม่มีสิทธิ์ ให้แจ้งเตือนแต่ไม่ทำให้บันทึกค่าอื่นล้มเหลวไปด้วย)
+    let worklistDirWarning = '';
+    try {
+      dicomService.setWorklistDir(currentSettings.mwl.worklistDir);
+    } catch (dirErr) {
+      console.error('[Settings] ---> ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ:', dirErr);
+      worklistDirWarning = ` (คำเตือน: ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${dirErr.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${dicomService.getWorklistDir()})`;
+    }
+
+    // เริ่ม MPPS server ใหม่ด้วย port ล่าสุด — ถ้าเริ่มไม่สำเร็จ (เช่น port ชนกับโปรแกรมอื่น) แค่แจ้งเตือน
+    // ไม่ทำให้การบันทึกค่าอื่นๆ (DB, worklist dir) ล้มเหลวไปด้วย และไม่ปิดทั้งเซิร์ฟเวอร์ทิ้ง
+    try {
+      mppsService.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
+    } catch (mppsErr) {
+      console.error('[Settings] ---> เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ:', mppsErr.message);
+      worklistDirWarning += ` (คำเตือน: เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ - ${mppsErr.message} ระบบจะยังไม่รับสถานะ MPPS จากเครื่อง Modality จนกว่าจะแก้ port ให้ถูกต้อง)`;
+    }
 
     // ทดสอบว่าต่อฐานข้อมูลได้จริงหรือไม่ หลังบันทึกค่าใหม่
     try {
       await db.query('SELECT 1');
       res.json({
         success: true,
-        settings: currentSettings,
-        message: 'บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ',
+        settings: maskSecrets(currentSettings),
+        worklistDirActive: dicomService.getWorklistDir(),
+        message: `บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ${worklistDirWarning}`,
       });
     } catch (dbErr) {
       console.error('[Settings] ---> เชื่อมต่อฐานข้อมูลไม่สำเร็จหลังบันทึกค่าใหม่:', dbErr);
       const friendlyMessage = db.friendlyErrorMessage(dbErr);
       res.json({
         success: false,
-        settings: currentSettings,
-        message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}`,
+        settings: maskSecrets(currentSettings),
+        worklistDirActive: dicomService.getWorklistDir(),
+        message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}${worklistDirWarning}`,
         error: dbErr.message,
       });
     }
@@ -256,6 +349,118 @@ app.post('/api/xray-report', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// เช็คว่า path ที่ให้มาเป็น "ราก" ของไดรฟ์ Windows หรือไม่ เช่น "D:\" หรือ "D:"
+function isWindowsDriveRoot(p) {
+  return /^[a-zA-Z]:[\\/]?$/.test(p);
+}
+
+// หาไดรฟ์ทั้งหมดที่มีอยู่จริงบนเครื่อง Windows (A: - Z:) โดยเช็คว่าเข้าถึงได้จริงหรือไม่
+function listWindowsDrives() {
+  const drives = [];
+  for (let i = 65; i <= 90; i++) {
+    const letter = String.fromCharCode(i);
+    const root = `${letter}:\\`;
+    try {
+      if (fs.existsSync(root)) {
+        drives.push({ name: `${letter}:`, path: root });
+      }
+    } catch (err) {
+      // ข้ามไดรฟ์นี้ไป (เช่น ไดรฟ์ CD-ROM ที่ไม่มีแผ่น)
+    }
+  }
+  return drives;
+}
+
+// ถ้าไม่ส่ง path หรือส่งค่าว่าง จะคืนรายชื่อไดรฟ์ทั้งหมดให้เลือกก่อน
+app.get('/api/fs/browse', (req, res) => {
+  const platform = os.platform();
+  let targetPath = (req.query.path || '').toString().trim();
+
+  try {
+    if (!targetPath) {
+      if (platform === 'win32') {
+        return res.json({ success: true, path: '', parent: null, isRoot: true, folders: listWindowsDrives() });
+      }
+      targetPath = '/'; // Linux/Mac ไม่มีแนวคิดไดรฟ์ ให้เริ่มที่ root เลย
+    }
+
+    const resolved = path.resolve(targetPath);
+
+    let stat;
+    try {
+      stat = fs.statSync(resolved);
+    } catch (err) {
+      return res.status(400).json({ success: false, message: 'ไม่พบโฟลเดอร์นี้: ' + err.message });
+    }
+
+    if (!stat.isDirectory()) {
+      return res.status(400).json({ success: false, message: 'path ที่ระบุไม่ใช่โฟลเดอร์' });
+    }
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(resolved, { withFileTypes: true });
+    } catch (err) {
+      return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงโฟลเดอร์นี้: ' + err.message });
+    }
+
+    const folders = entries
+      .filter((entry) => {
+        try {
+          return entry.isDirectory();
+        } catch (err) {
+          return false; // ข้าม entry ที่ stat ไม่ได้ (เช่น junction เสีย)
+        }
+      })
+      .map((entry) => ({ name: entry.name, path: path.join(resolved, entry.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+
+    // หา parent ของ path ปัจจุบัน เพื่อทำปุ่ม "ย้อนกลับ"
+    let parent;
+    if (platform === 'win32' && isWindowsDriveRoot(resolved)) {
+      parent = ''; // อยู่ที่รากไดรฟ์แล้ว ย้อนกลับ = กลับไปหน้าเลือกไดรฟ์
+    } else {
+      const up = path.dirname(resolved);
+      parent = up === resolved ? null : up; // ถึง root ของระบบไฟล์แล้ว (เช่น "/" บน Linux) ไม่มี parent ต่อ
+    }
+
+    res.json({ success: true, path: resolved, parent, isRoot: false, folders });
+  } catch (err) {
+    res.status(400).json({ success: false, message: 'เปิดโฟลเดอร์นี้ไม่ได้: ' + err.message });
+  }
+});
+
+// POST /api/fs/mkdir { parentPath, name } -> สร้างโฟลเดอร์ย่อยใหม่ในตำแหน่งที่กำลังดูอยู่
+app.post('/api/fs/mkdir', (req, res) => {
+  try {
+    const { parentPath, name } = req.body;
+    const safeName = (name || '').trim();
+
+    if (!parentPath || !safeName) {
+      return res.status(400).json({ success: false, message: 'กรุณาระบุตำแหน่งและชื่อโฟลเดอร์' });
+    }
+    // กันชื่อโฟลเดอร์ที่มีอักขระอันตราย ไม่ให้หลุดออกนอกโฟลเดอร์ปัจจุบันได้
+    if (safeName.includes('/') || safeName.includes('\\') || safeName.includes('..')) {
+      return res.status(400).json({ success: false, message: 'ชื่อโฟลเดอร์ไม่ถูกต้อง (ห้ามมี / \\ หรือ ..)' });
+    }
+
+    const newPath = path.join(parentPath, safeName);
+    fs.mkdirSync(newPath, { recursive: false });
+    res.json({ success: true, path: newPath });
+  } catch (err) {
+    res.status(400).json({ success: false, message: 'สร้างโฟลเดอร์ไม่สำเร็จ: ' + err.message });
+  }
+});
+
+const httpServer = app.listen(PORT, () => {
   console.log(`Backend API กำลังทำงานที่ ---> http://localhost:${PORT}`);
+});
+
+httpServer.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[Server] ---> Port ${PORT} ถูกใช้งานอยู่แล้วอาจมีอีก process รันซ้อนอยู่`);
+  } else {
+    console.error('[Server] ---> เปิด server หลักไม่สำเร็จ:', err);
+  }
+  process.exit(1);
 });

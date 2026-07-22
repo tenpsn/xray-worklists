@@ -1,24 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 
-// ไฟล์เก็บการตั้งค่า HIS (ฐานข้อมูล) และ MWL (DICOM Worklist)
+// ไฟล์เก็บการตั้งค่า HIS และ MWL
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 
-// ค่าเริ่มต้น ดึงมาจาก .env เผื่อยังไม่เคยตั้งค่าผ่านหน้าเว็บมาก่อน
+// ค่าเริ่มต้น ดึงมาจาก .env เผื่อยังไม่เคยตั้งค่าผ่านหน้าเว็บ
 const DEFAULT_SETTINGS = {
   his: {
-    dbType: process.env.DB_TYPE || 'postgres',      // 'postgres' หรือ 'mysql'
-    host: process.env.PGHOST || '',
-    port: process.env.PGPORT || '5432',
-    database: process.env.PGDATABASE || '',
-    username: process.env.PGUSER || '',
-    password: process.env.PGPASSWORD || '',
-    encoding: process.env.DB_ENCODING || 'UTF8',    // 'UTF8' | 'TIS620' | 'WIN874'
+    dbType: process.env.DB_TYPE,
+    host: process.env.PGHOST,
+    port: process.env.PGPORT,
+    database: process.env.PGDATABASE,
+    username: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    encoding: process.env.DB_ENCODING,
   },
   mwl: {
     aet: process.env.MWL_AET || 'ORTHANC',
     port: process.env.MWL_PORT || '7000',
     mppsPort: process.env.MPPS_PORT || '7001', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
+    worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
   },
 };
 

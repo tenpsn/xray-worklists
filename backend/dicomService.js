@@ -54,30 +54,71 @@ function getOrCreateStudyInstanceUID(accessionNumber) {
 function getPreviousHash(accessionNumber) {
   const entry = worklistState[accessionNumber];
   if (entry && typeof entry === 'object') return entry.hash;
-  return entry; // รูปแบบเก่า: เก็บ hash เป็น string ตรงๆ
+  return entry;
 }
-const WORKLIST_DIR = path.join(__dirname, 'worklists');
+// ค่าเริ่มต้น (ถ้าไม่ได้ตั้งค่าอื่นไว้ผ่านหน้า Settings) — โฟลเดอร์ worklists ในตัว backend เอง
+const DEFAULT_WORKLIST_DIR = path.join(__dirname, 'worklists');
 
-const STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
+// โฟลเดอร์ worklists ปัจจุบัน (เปลี่ยนได้ที่ runtime ผ่าน setWorklistDir เมื่อผู้ใช้ตั้งค่าใหม่จากหน้าเว็บ
+// เช่น บางโรงพยาบาลต้องการให้โฟลเดอร์นี้อยู่นอก backend เช่นแชร์ไดรฟ์ร่วมกับเครื่อง Orthanc)
+let WORKLIST_DIR = DEFAULT_WORKLIST_DIR;
+let STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
 
-// ตรวจสอบว่ามีโฟลเดอร์ worklists หรือยัง ถ้ายังไม่มีให้สร้างขึ้นมา
-if (!fs.existsSync(WORKLIST_DIR)) {
-  fs.mkdirSync(WORKLIST_DIR, { recursive: true });
-  console.log(`[DICOM Service] ---> สร้างโฟลเดอร์ worklists: ${WORKLIST_DIR}`);
-}
-
-// โหลด state เดิมจากไฟล์ (ถ้ามี) เก็บไว้ใน memory ตลอดอายุของโปรเซส
+// เก็บ state (hash + StudyInstanceUID ของแต่ละ XN) ไว้ใน memory ตลอดอายุของโปรเซส
 let worklistState = {};
-try {
-  if (fs.existsSync(STATE_FILE)) {
-    worklistState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+
+// ตรวจสอบว่ามีโฟลเดอร์อยู่หรือยัง ถ้ายังไม่มีให้สร้างขึ้นมา (โยน error ออกไปถ้าสร้างไม่ได้ เช่น path ผิด/ไม่มีสิทธิ์)
+function ensureDirExists(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`[DICOM Service] ---> สร้างโฟลเดอร์ worklists: ${dir}`);
   }
-} catch (err) {
-  console.warn('[DICOM Service] ---> ไม่สามารถอ่าน state file ได้ เริ่มต้นใหม่:', err.message);
-  worklistState = {};
 }
 
-// บันทึก state ลงไฟล์ (เขียนทับทั้งไฟล์ทุกครั้ง เพราะไฟล์เล็กมาก ไม่กระทบ performance)
+// โหลด state จากไฟล์ .worklist-state.json ของโฟลเดอร์ปัจจุบัน (ถ้ามี)
+function loadStateFromDisk() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      worklistState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    } else {
+      worklistState = {};
+    }
+  } catch (err) {
+    console.warn('[DICOM Service] ---> ไม่สามารถอ่าน state file ได้ เริ่มต้นใหม่:', err.message);
+    worklistState = {};
+  }
+}
+
+// เตรียมโฟลเดอร์ default ไว้ตั้งแต่ตอนโหลดโมดูล (เผื่อยังไม่มีการเรียก setWorklistDir เลย)
+ensureDirExists(WORKLIST_DIR);
+loadStateFromDisk();
+
+// เปลี่ยนโฟลเดอร์เก็บไฟล์ worklist ตามค่าที่ตั้งไว้จากหน้า Settings
+// - ถ้า dirPath ว่างเปล่า/ไม่ได้ระบุ -> กลับไปใช้ค่า default (backend/worklists)
+// - ถ้าระบุ path มา -> ใช้ path นั้น (รองรับทั้ง path แบบสัมพัทธ์และแบบเต็ม, backslash/forward slash)
+// - โยน error ออกไปถ้าสร้าง/เข้าถึงโฟลเดอร์นั้นไม่ได้ ให้ผู้เรียก (server.js) เป็นคนจัดการแจ้งเตือนผู้ใช้
+function setWorklistDir(dirPath) {
+  const trimmed = (dirPath || '').trim();
+  const resolved = trimmed !== '' ? path.resolve(trimmed) : DEFAULT_WORKLIST_DIR;
+
+  if (resolved === WORKLIST_DIR) {
+    return WORKLIST_DIR; // ไม่มีอะไรเปลี่ยน ไม่ต้องทำอะไรต่อ
+  }
+
+  ensureDirExists(resolved); // ถ้า path ผิด/ไม่มีสิทธิ์เขียน จะโยน error ออกไปตรงนี้
+
+  WORKLIST_DIR = resolved;
+  STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
+  loadStateFromDisk();
+  console.log(`[DICOM Service] ---> ใช้งานโฟลเดอร์ worklists ที่: ${WORKLIST_DIR}`);
+  return WORKLIST_DIR;
+}
+
+function getWorklistDir() {
+  return WORKLIST_DIR;
+}
+
+// บันทึก state ลงไฟล์
 function saveState() {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(worklistState), 'utf8');
@@ -107,7 +148,6 @@ function computeItemHash(item) {
 // แปลงวันที่จาก DB ให้เป็น Format DICOM (YYYYMMDD)
 function formatDicomDate(dateStr) {
   if (!dateStr) return '';
-  // สร้าง Date object จาก string โดยไม่สนใจ Timezone ของ Server
   const d = new Date(dateStr);
   const year = d.getFullYear();
   const month = ('0' + (d.getMonth() + 1)).slice(-2);
@@ -122,7 +162,7 @@ function formatDicomTime(timeStr) {
   return timeStr.replace(/:/g, '').substring(0, 6);
 }
 
-// ลบไฟล์ .dump อย่างปลอดภัย ไม่ทำให้โปรเซสล่มแม้ไฟล์จะถูกล็อกอยู่ชั่วขณะ (EBUSY บน Windows)
+// ลบไฟล์ .dump
 function safeDeleteDumpFile(filePath, attempt = 1) {
   try {
     fs.unlinkSync(filePath);
@@ -132,7 +172,6 @@ function safeDeleteDumpFile(filePath, attempt = 1) {
       console.warn(`[DICOM Service] ---> ไฟล์ ${filePath} ถูกล็อกอยู่ (EBUSY) กำลังลองลบใหม่ครั้งที่ ${attempt + 1}...`);
       setTimeout(() => safeDeleteDumpFile(filePath, attempt + 1), 200 * attempt);
     } else if (err.code !== 'ENOENT') {
-      // ENOENT (ไฟล์ไม่มีอยู่แล้ว) ไม่ต้องเตือน กรณีอื่นแค่ log ไว้ ไม่ throw ต่อ
       console.warn(`[DICOM Service] ---> ไม่สามารถลบไฟล์ .dump ได้ (${err.code}): ${filePath}`);
     }
   }
@@ -238,7 +277,6 @@ async function generateWorklistFile(item) {
           console.log(`[DICOM Service] ---> สร้าง/อัพเดทไฟล์ Worklist สำเร็จ: ${wlFilePath}`);
           resolve({ success: true, file: wlFilePath });
         } catch (cbErr) {
-          // กันสุดท้ายจริงๆ: ไม่ว่าจะเกิดอะไรใน callback นี้ ก็ไม่ปล่อยให้หลุดออกไปทำให้ process ตาย
           console.error('[DICOM Service] ---> Error inside exec callback:', cbErr);
           resolve({ success: true, file: dumpFilePath, message: 'Completed with warning' });
         }
@@ -257,7 +295,7 @@ function deleteWorklistFile(xn) {
   if (fs.existsSync(wlFilePath)) {
     try {
       fs.unlinkSync(wlFilePath);
-      console.log(`[DICOM Service] ---> ลบไฟล์สำเร็จ (Y,Y): ${xn}.wl`);
+      console.log(`[DICOM Service] ---> ลบไฟล์สำเร็จ: ${xn}.wl`);
     } catch (err) {
       console.error(`[DICOM Service] ---> ลบไฟล์ไม่สำเร็จ: ${xn}.wl`, err);
     }
@@ -271,5 +309,7 @@ function deleteWorklistFile(xn) {
 
 module.exports = {
   generateWorklistFile,
-  deleteWorklistFile
+  deleteWorklistFile,
+  setWorklistDir,
+  getWorklistDir
 };

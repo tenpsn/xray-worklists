@@ -78,8 +78,7 @@ function initPool(settings) {
   return pool;
 }
 
-// รันคำสั่ง SQL โดยไม่ต้องสนใจว่าเบื้องหลังเป็น Postgres หรือ MySQL
-// สำหรับ MySQL จะแปลง placeholder จาก $1,$2,... เป็น ? ให้อัตโนมัติ
+// รันคำสั่ง SQL โดยสำหรับ MySQL จะแปลง placeholder จาก $1,$2,... เป็น ? ให้อัตโนมัติ
 async function query(sql, params = []) {
   if (!pool) {
     throw new Error('ยังไม่ได้เชื่อมต่อฐานข้อมูล (pool is not initialized)');
@@ -105,12 +104,12 @@ function friendlyErrorMessage(err) {
 
   switch (code) {
     case 'ENOTFOUND':
-      return `หา Host "${err.hostname || ''}" ไม่เจอ กรุณาตรวจสอบ IP Address ในหน้าตั้งค่า`;
+      return `ไม่เจอ Hostname "${err.hostname || ''}" กรุณาตรวจสอบ IP Address`;
     case 'ECONNREFUSED':
-      return 'เชื่อมต่อฐานข้อมูลไม่ติด (Connection refused) กรุณาตรวจสอบ Port หรือว่าฐานข้อมูลเปิดให้เชื่อมต่อจากเครื่องนี้หรือไม่';
+      return 'เชื่อมต่อฐานข้อมูลไม่ติด กรุณาตรวจสอบ Port';
     case 'ETIMEDOUT':
     case 'ETIMEOUT':
-      return 'หมดเวลาเชื่อมต่อฐานข้อมูล (Timeout) กรุณาตรวจสอบ IP Address / Port หรือไฟร์วอลล์';
+      return 'หมดเวลาเชื่อมต่อฐานข้อมูล กรุณาตรวจสอบ IP Address / Port หรือไฟร์วอลล์';
 
     // Postgres
     case '28P01':

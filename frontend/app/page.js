@@ -136,8 +136,6 @@ export default function Page() {
     }
   }
 
-  // ป้องกัน stale closure สำหรับตัวแปร state ที่ใช้ใน setInterval
-  // สร้างตัวแปรอ้างอิงให้ setInterval เรียกใช้ loadData ตัวล่าสุดเสมอ
   const loadDataRef = useRef(loadData);
   useEffect(() => {
     loadDataRef.current = loadData;
@@ -160,9 +158,7 @@ export default function Page() {
     };
   }, []);
 
-  // ปุ่มเปลี่ยนภาษาแค่เปลี่ยนการแสดงผลของแถวที่โหลดมาแล้วเฉยๆ ไม่ได้ยิง request ใหม่
-  // แต่ไฟล์ .wl ถูกสร้างที่ backend ตอนดึงข้อมูล จึงต้อง "ค้นหา" ใหม่ทุกครั้งที่สลับภาษา
-  // เพื่อให้ backend สร้างไฟล์ .wl ด้วยภาษาที่เพิ่งเลือกจริงๆ
+  // backend สร้างไฟล์ .wl ด้วยภาษาที่เลือก
   useEffect(() => {
     if (isFirstLangRender.current) {
       isFirstLangRender.current = false;
@@ -182,14 +178,14 @@ export default function Page() {
               className={lang === 'th' ? 'active' : ''}
               onClick={() => setLang('th')}
             >
-              ไทย
+              TH
             </button>
             <button
               type="button"
               className={lang === 'en' ? 'active' : ''}
               onClick={() => setLang('en')}
             >
-              English
+              ENG
             </button>
           </div>
           <a className="settings-link" href="/settings">ตั้งค่าระบบ</a>
