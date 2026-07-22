@@ -183,8 +183,6 @@ app.get('/health', async (req, res) => {
     await db.query('SELECT 1');
     res.json({ ok: true, db: 'connected' });
   } catch (err) {
-    // process ยังทำงานอยู่ (ตอบ HTTP ได้) แต่ต่อฐานข้อมูลไม่ได้ — ถือว่า "ไม่พร้อมใช้งาน" จริง
-    // ให้เครื่องมือ monitor ภายนอกจับได้ ไม่ใช่แค่เช็คว่า process ตายหรือไม่
     res.status(503).json({ ok: false, db: 'disconnected', error: db.friendlyErrorMessage(err) });
   }
 });
@@ -343,7 +341,7 @@ app.post('/api/xray-report', async (req, res) => {
   } catch (err) {
     console.error('Query error:', err);
     const friendlyMessage = db.friendlyErrorMessage(err);
-    res.status(500).json({ success: false, message: friendlyMessage, error: err.message });
+    res.status(500).json({ success: false, message: friendlyMessage });
   } finally {
     isProcessingXrayReport = false;
   }

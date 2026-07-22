@@ -1,3 +1,7 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 body { 
   font-family: 'Sarabun', Arial, sans-serif; 
   margin: 24px; 
@@ -28,6 +32,8 @@ h1 {
 input[type="text"], 
 input[type="number"],
 input[type="password"] {
+  font-family: inherit; /* input ไม่สืบทอด font จาก body เองโดย default ต้องประกาศเองเสมอ */
+  font-size: 13px; /* ให้ตรงกับ label/button/th/td ที่ใช้ 13px เหมือนกันทั้งหน้า */
   padding: 6px 8px; 
   border: 1px solid #ccc; 
   border-radius: 4px; 
@@ -126,7 +132,7 @@ tbody tr:hover {
   color: #2563eb;
   border: none;
   border-radius: 0;
-  padding: 6px 14px;
+  padding: 8px 16px; /* ให้เท่ากับ .settings-link ทุกด้าน จะได้สูง/กว้างเท่ากันพอดี */
   font-size: 13px;
 }
 
@@ -184,6 +190,8 @@ tbody tr:hover {
 }
 
 .settings-grid select {
+  font-family: inherit;
+  font-size: 13px;
   padding: 6px 8px;
   border: 1px solid #ccc;
   border-radius: 4px;
@@ -338,4 +346,121 @@ tbody tr:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* ================================================================
+   Responsive — ปรับ layout ให้ใช้งานได้ตั้งแต่จอมือถือ (~360px)
+   ไปจนถึงจอเดสก์ท็อปกว้างๆ โดยไม่ต้องมี layout แยกสำหรับแต่ละหน้า
+   ================================================================ */
+
+/* จอแท็บเล็ต / เดสก์ท็อปแคบ (เช่นแบ่งจอ 2 ฝั่ง) */
+@media (max-width: 900px) {
+  body {
+    margin: 16px;
+  }
+
+  .settings-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+/* จอมือถือ/แท็บเล็ตแนวตั้ง */
+@media (max-width: 640px) {
+  body {
+    margin: 12px;
+    font-size: 14px;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+
+  /* หัวข้อ + ปุ่มด้านขวา ไม่พอวางแนวนอนแล้ว ให้ตกลงมาเป็นแนวตั้งแทน */
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  /* ช่องกรองแต่ละอันเรียงเต็มความกว้าง อ่าน/กดง่ายขึ้นบนจอแคบ แทนที่จะบีบเรียงติดกัน */
+  .filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filters label {
+    width: 100%;
+  }
+
+  .filters input[type="text"],
+  .filters input[type="number"] {
+    width: 100%;
+  }
+
+  .filters button {
+    width: 100%;
+  }
+
+  /* ตารางข้อมูลมีคอลัมน์เยอะ (17 คอลัมน์) ไม่มีทางบีบให้พอดีจอมือถือได้แบบสวยงาม
+     จึงปล่อยให้เลื่อนซ้าย-ขวาได้ (สืบทอดมาจาก .table-wrap เดิม) แต่ลดขนาดตัวอักษร/padding
+     ลงอีกนิด ให้เห็นข้อมูลได้เยอะขึ้นต่อการเลื่อนหนึ่งครั้ง */
+  th, td {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  .settings-card {
+    padding: 12px 14px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .settings-actions button,
+  .settings-actions a {
+    text-align: center;
+  }
+
+  /* หน้าต่างเลือกโฟลเดอร์ ให้เต็มจอแทบทั้งหมดบนมือถือ อ่าน path ยาวๆ ได้ง่ายขึ้น */
+  .modal-box {
+    width: 100%;
+    max-width: 96vw;
+    max-height: 90vh;
+  }
+
+  .modal-footer {
+    flex-wrap: wrap;
+  }
+
+  .modal-footer button {
+    flex: 1;
+  }
+
+  .new-folder-row {
+    flex-direction: column;
+  }
+}
+
+/* จอมือถือจอเล็กมาก */
+@media (max-width: 380px) {
+  body {
+    margin: 8px;
+  }
+
+  /* ลดขนาดทั้งคู่พร้อมกัน (เดิมลดแค่ .lang-toggle อย่างเดียว ทำให้กลับมาไม่เท่ากันอีกทีตรงจอเล็กมาก) */
+  .lang-toggle button,
+  .settings-link {
+    padding: 6px 10px;
+  }
 }

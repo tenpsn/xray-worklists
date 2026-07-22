@@ -267,14 +267,14 @@ export default function SettingsPage() {
 
           <label style={{ gridColumn: '1 / -1' }}>
             โฟลเดอร์เก็บไฟล์ Worklist (.wl)
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <input
                 type="text"
                 readOnly
                 placeholder="ค่าเริ่มต้น (backend/worklists) — กดปุ่มด้านขวาเพื่อเลือก"
                 value={form.mwl.worklistDir}
                 onClick={openPicker}
-                style={{ flex: 1, cursor: 'pointer', background: '#f9fafb' }}
+                style={{ flex: 1, minWidth: '200px', cursor: 'pointer', background: '#f9fafb' }}
               />
               <button type="button" onClick={openPicker}>เลือกโฟลเดอร์...</button>
               {form.mwl.worklistDir && (
