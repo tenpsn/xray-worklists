@@ -183,6 +183,10 @@ async function generateWorklistFile(item) {
   return new Promise((resolve, reject) => {
     try {
       const accessionNumber = item.xn || `XN${Date.now()}`;
+      
+      // สร้างชื่อไฟล์ที่ปลอดภัย โดยแทนที่ /, \, : ด้วยขีดกลาง (-)
+      const safeFileName = String(accessionNumber).replace(/[\\/:]/g, '-');
+
       const patientId = item.hn || 'UNKNOWN';
       const useEnglish = item.lang === 'en';
 
@@ -200,7 +204,8 @@ async function generateWorklistFile(item) {
       // StudyInstanceUID ต้องคงที่ตลอดอายุของรายการนี้ (ไม่สุ่มใหม่ทุกครั้งที่อัพเดทไฟล์)
       const studyInstanceUID = getOrCreateStudyInstanceUID(accessionNumber);
 
-      const wlFileNameCheck = `${accessionNumber}.wl`;
+      // ใช้ safeFileName เพื่อระบุชื่อไฟล์ในการตรวจสอบและสร้างไฟล์
+      const wlFileNameCheck = `${safeFileName}.wl`;
       const wlFilePathCheck = path.join(WORKLIST_DIR, wlFileNameCheck);
 
       // เทียบ hash ของข้อมูลกับครั้งล่าสุดที่สร้างไฟล์ ถ้าไม่เปลี่ยนและไฟล์ .wl ยังอยู่ครบ -> ข้าม ไม่ต้องสร้างซ้ำ
@@ -245,8 +250,9 @@ async function generateWorklistFile(item) {
 (FFFE,E0DD) na
       `.trim();
 
-      const dumpFileName = `${accessionNumber}.dump`;
-      const wlFileName = `${accessionNumber}.wl`;
+      // ใช้ safeFileName ในการสร้างไฟล์
+      const dumpFileName = `${safeFileName}.dump`;
+      const wlFileName = `${safeFileName}.wl`;
       
       const dumpFilePath = path.join(WORKLIST_DIR, dumpFileName);
       const wlFilePath = path.join(WORKLIST_DIR, wlFileName);

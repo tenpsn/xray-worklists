@@ -167,6 +167,7 @@ export default function SettingsPage() {
             >
               <option value="mysql">MySQL</option>
               <option value="postgres">Postgres</option>
+              <option value="mssql">MS SQL Server</option>
             </select>
           </label>
 

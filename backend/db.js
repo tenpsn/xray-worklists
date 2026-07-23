@@ -1,4 +1,4 @@
-// รองรับทั้ง Postgres และ MySQL
+// รองรับ Postgres, MySQL และ MS SQL Server
 // โดยเลือกใช้ตัวไหนตามค่า settings.his.dbType ที่ตั้งจากหน้าเว็บ (Settings)
 
 let pool = null;
@@ -29,14 +29,18 @@ function mapEncodingToPgClientEncoding(encoding) {
 }
 
 // (สร้าง/สร้างใหม่) connection pool ตามการตั้งค่าปัจจุบัน
-function initPool(settings) {
+async function initPool(settings) {
   const his = settings.his || {};
 
   // ปิด pool เก่าก่อน (ถ้ามี) เพื่อไม่ให้ connection ค้าง
   if (pool && typeof pool.end === 'function') {
     pool.end().catch((err) => {
-      console.warn('[DB] ---> ปิด pool เดิมไม่สำเร็จ (ไม่ร้ายแรง):', err.message);
+      console.warn('[DB] ---> ปิด pool เดิมไม่สำเร็จ:', err.message);
     });
+  } else if (currentType === 'mssql' && pool && typeof pool.close === 'function') {
+      pool.close().catch(err => {
+          console.warn('[DB] ---> ปิด mssql pool เดิมไม่สำเร็จ:', err.message);
+      });
   }
 
   if (his.dbType === 'mysql') {
@@ -54,7 +58,29 @@ function initPool(settings) {
     });
     currentType = 'mysql';
     console.log(`[DB] ---> เชื่อมต่อ MySQL: ${his.host}:${his.port}/${his.database}`);
+  } else if (his.dbType === 'mssql') {
+    const sql = require('mssql');
+    const config = {
+      user: his.username,
+      password: his.password,
+      server: his.host,
+      port: Number(his.port) || 1433,
+      database: his.database,
+      options: {
+        encrypt: false, 
+        trustServerCertificate: true, 
+        enableArithAbort: true,
+        connectTimeout: 5000
+      },
+    };
+    
+    const poolObj = new sql.ConnectionPool(config);
+    pool = await poolObj.connect();
+    currentType = 'mssql';
+    console.log(`[DB] ---> เชื่อมต่อ MS SQL Server: ${his.host}:${his.port}/${his.database}`);
+    
   } else {
+    // pg เป็น default 
     const { Pool } = require('pg');
     const clientEncoding = mapEncodingToPgClientEncoding(his.encoding);
     pool = new Pool({
@@ -78,13 +104,33 @@ function initPool(settings) {
   return pool;
 }
 
-// รันคำสั่ง SQL โดยสำหรับ MySQL จะแปลง placeholder จาก $1,$2,... เป็น ? ให้อัตโนมัติ
+// รันคำสั่ง SQL 
 async function query(sql, params = []) {
   if (!pool) {
     throw new Error('ยังไม่ได้เชื่อมต่อฐานข้อมูล (pool is not initialized)');
   }
 
-  if (currentType === 'mysql') {
+  if (currentType === 'mssql') {
+    const mssql = require('mssql');
+    const request = pool.request();
+    
+    // bind ค่า params กับ @p1, @p2 ...
+    if (params && params.length > 0) {
+      params.forEach((param, index) => {
+        request.input(`p${index + 1}`, param);
+      });
+    }
+
+    // แก้ placeholder จาก $1 หรือ ? ให้เป็น @p1
+    let i = 1;
+    // รองรับทั้งแบบ ? (mysql) และ $1 (pg)
+    const mssqlString = sql.replace(/\?|\$\d+/g, () => `@p${i++}`);
+
+    const result = await request.query(mssqlString);
+    // คืนค่ารูปแบบเดียวกันกับ pg/mysql คือมี .rows และ .rowCount
+    return { rows: result.recordset, rowCount: result.rowsAffected[0] || result.recordset.length };
+
+  } else if (currentType === 'mysql') {
     const mysqlSql = sql.replace(/\$\d+/g, '?');
     const [rows] = await pool.query(mysqlSql, params);
     return { rows, rowCount: Array.isArray(rows) ? rows.length : 0 };
@@ -126,6 +172,12 @@ function friendlyErrorMessage(err) {
       return 'ไม่พบฐานข้อมูลชื่อนี้ กรุณาตรวจสอบชื่อ Database (MySQL)';
     case 'ER_DBACCESS_DENIED_ERROR':
       return 'Username นี้ไม่มีสิทธิ์เข้าถึงฐานข้อมูลนี้ (MySQL)';
+      
+    // MSSQL
+    case 'ELOGIN':
+      return 'Username หรือ Password ไม่ถูกต้อง (MS SQL)';
+    case 'ESOCKET':
+      return 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้ (โปรดตรวจสอบ IP Address/Port)';
 
     default:
       return err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล';

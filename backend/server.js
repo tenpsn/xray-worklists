@@ -44,7 +44,7 @@ app.use(express.json());
 
 // โหลดการตั้งค่า (HIS DB + MWL) แล้วเปิด connection pool ตั้งแต่ตอนสตาร์ทเซิร์ฟเวอร์
 let currentSettings = settingsService.loadSettings();
-db.initPool(currentSettings);
+db.initPool(currentSettings).catch(err => console.error('[DB] ---> สตาร์ทเซิร์ฟเวอร์เชื่อมต่อ DB ไม่สำเร็จ:', err.message));
 
 // ตั้งค่าโฟลเดอร์เก็บไฟล์ worklist ตามค่าที่บันทึกไว้ (ถ้าไม่ได้ตั้งไว้ จะใช้ backend/worklists เป็นค่า default)
 try {
@@ -92,14 +92,75 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// เพิ่ม parameter รับอาร์เรย์แต่ละสถานะเข้ามา + dbType (postgres/mysql) เพื่อสลับ syntax วันที่ให้ถูกต้อง
+// เพิ่ม parameter รับอาร์เรย์แต่ละสถานะเข้ามา + dbType (postgres/mysql/mssql) เพื่อสลับ syntax วันที่ให้ถูกต้อง
 function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs = [], xns_NN = [], xns_YN = [], xns_NY = [], dbType = 'postgres') {
   const params = [];
   let paramIndex = 1;
-
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 0;
 
-  // เงื่อนไขช่วงวันที่ ต่างกันระหว่าง Postgres กับ MySQL
+  // 1. MS SQL
+  if (dbType === 'mssql') {
+    let sql = `
+      SELECT 
+        v.VN as xn, 
+        pt.Code as hn, 
+        rrh.Code as cid, 
+        '' as pname,
+        p.FirstName as fname, 
+        p.LastName as lname,
+        CONVERT(varchar(10), p.BirthDT, 23) as birthday, 
+        CASE 
+          WHEN p.GenderKey = -1 THEN '1' 
+          WHEN p.GenderKey = -2 THEN '2' 
+          ELSE CAST(p.GenderKey AS VARCHAR)
+        END as sex,
+        rr.ItemName as xraylist, 
+        CONVERT(varchar(10), rrh.IssueDT, 23) as "StudyDate", 
+        CONVERT(varchar(8), rrh.IssueDT, 108) as "StudyTime",
+        '' as xray_items_group,
+        'N' as confirm, 
+        'N' as confirm_read_film,
+        '' as Doctor, 
+        rr.ItemKey as xray_items_code, 
+        '' as Modality,
+        '' as stuid, 
+        rr.IssueServiceUnitKey as department_name
+      FROM RadRequestHeader rrh
+      INNER JOIN RadRequest rr ON rrh.RadRequestHeaderKey = rr.RadRequestHeaderKey
+      INNER JOIN Patient pt ON rrh.PatientKey = pt.PatientKey
+      INNER JOIN Person p ON pt.PatientKey = p.PersonKey
+      INNER JOIN Visit v ON v.VisitKey = rrh.VisitKey
+      WHERE DATEDIFF(day, rrh.IssueDT, GETDATE()) BETWEEN 0 AND $${paramIndex}
+        AND rrh.IsDone = 0
+    `;
+    params.push(safeDateback);
+    paramIndex++;
+
+    if (include && include.trim() !== '') {
+      sql += ` AND rr.ItemName LIKE $${paramIndex}`;
+      params.push(`%${include}%`);
+      paramIndex++;
+    }
+
+    if (exclude && exclude.trim() !== '') {
+      sql += ` AND rr.ItemName NOT LIKE $${paramIndex}`;
+      params.push(`%${exclude}%`);
+      paramIndex++;
+    }
+
+    if (existingXNs && existingXNs.length > 0) {
+      const existingPlaceholders = existingXNs.map((_, i) => `$${paramIndex + i}`).join(', ');
+      let filterSql = `v.VN NOT IN (${existingPlaceholders})`;
+      params.push(...existingXNs);
+      paramIndex += existingXNs.length;
+      sql += ` AND (${filterSql})`;
+    }
+
+    sql += ` ORDER BY rrh.Code DESC`;
+    return { sql, params };
+  }
+
+  // 2. MySQL / Postgres
   const dateFilter = dbType === 'mysql'
     ? `a.request_date BETWEEN DATE_SUB(CURDATE(), INTERVAL $${paramIndex} DAY) AND CURDATE()`
     : `a.request_date BETWEEN current_date - $${paramIndex}::integer AND current_date`;
@@ -138,7 +199,6 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
     sql += ` AND a.confirm = 'N'`;
   }
 
-  // --- ส่วนที่แก้ไข: กรองแบบเจาะจงการเปลี่ยนสถานะ ---
   if (existingXNs && existingXNs.length > 0) {
     // เอา XN ที่มีอยู่แล้วตัดออกไปก่อนเป็นพื้นฐาน
     const existingPlaceholders = existingXNs.map((_, i) => `$${paramIndex + i}`).join(', ');
@@ -221,7 +281,7 @@ app.post('/api/settings', async (req, res) => {
     const reconciledMwl = reconcileSecrets(mwl, currentSettings.mwl);
 
     currentSettings = settingsService.saveSettings({ his: reconciledHis, mwl: reconciledMwl });
-    db.initPool(currentSettings);
+    await db.initPool(currentSettings);
 
     // สลับไปใช้โฟลเดอร์ worklist ใหม่ตามที่ตั้งค่ามา (ถ้าตั้งไม่สำเร็จ เช่น path ผิด/ไม่มีสิทธิ์ ให้แจ้งเตือนแต่ไม่ทำให้บันทึกค่าอื่นล้มเหลวไปด้วย)
     let worklistDirWarning = '';
@@ -282,11 +342,22 @@ async function processWorklistFiles(records, displayLang) {
   isGeneratingWorklists = true;
 
   try {
-    for (let i = 0; i < records.length; i += WORKLIST_CONCURRENCY) {
-      const batch = records.slice(i, i + WORKLIST_CONCURRENCY);
+    // 1. กรองเอาเฉพาะข้อมูลที่ไม่ซ้ำกัน ใช้ xn เป็นตัวตรวจสอบ 
+    const uniqueRecords = [];
+    const seenXn = new Set();
+    
+    for (const record of records) {
+      if (!seenXn.has(record.xn)) {
+        seenXn.add(record.xn);
+        uniqueRecords.push(record);
+      }
+    }
+
+    // 2. ใช้ uniqueRecords ในการสร้างไฟล์
+    for (let i = 0; i < uniqueRecords.length; i += WORKLIST_CONCURRENCY) {
+      const batch = uniqueRecords.slice(i, i + WORKLIST_CONCURRENCY);
       await Promise.all(batch.map(async (record) => {
         try {
-
           record.lang = displayLang;
 
           // ถ้าสถานะเป็น Y, Y ให้ลบไฟล์ทิ้ง
