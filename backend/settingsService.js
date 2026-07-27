@@ -7,13 +7,15 @@ const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 // ค่าเริ่มต้น ดึงมาจาก .env เผื่อยังไม่เคยตั้งค่าผ่านหน้าเว็บ
 const DEFAULT_SETTINGS = {
   his: {
-    dbType: process.env.DB_TYPE, 
-    host: process.env.PGHOST || 'localhost',
-    port: process.env.PGPORT,
-    database: process.env.PGDATABASE,
-    username: process.env.PGUSER,
-    password: process.env.PGPASSWORD,
-    encoding: process.env.DB_ENCODING,
+    // ค่าเริ่มต้น
+    hisSystem: process.env.HIS_SYSTEM || '', 
+    dbType: process.env.DB_TYPE || '', 
+    host: process.env.PGHOST || '',
+    port: process.env.PGPORT || '',
+    database: process.env.PGDATABASE || '',
+    username: process.env.PGUSER || '',
+    password: process.env.PGPASSWORD || '',
+    encoding: process.env.DB_ENCODING || '',
   },
   mwl: {
     usehl7: process.env.USE_hl7 === 'true' || false,
@@ -23,6 +25,14 @@ const DEFAULT_SETTINGS = {
     port: process.env.MWL_PORT || '7000',
     mppsPort: process.env.MPPS_PORT || '7001', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
+    autoGenerate: {
+      enabled: process.env.AUTO_GENERATE !== 'false', 
+      intervalSec: Number(process.env.AUTO_GENERATE_INTERVAL_SEC) || 10,
+      dateback: Number(process.env.AUTO_GENERATE_DATEBACK) || 1,
+      include: process.env.AUTO_GENERATE_INCLUDE || '',
+      exclude: process.env.AUTO_GENERATE_EXCLUDE || '',
+      confirm: process.env.AUTO_GENERATE_CONFIRM === 'true' || false,
+    },
   },
 };
 

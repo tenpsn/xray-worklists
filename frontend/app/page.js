@@ -14,6 +14,14 @@ export default function Page() {
   const [status, setStatus] = useState('กำลังโหลดข้อมูล...');
   const [lang, setLang] = useState('th');
 
+  // เพิ่ม Ref สำหรับเก็บ "ค่าที่ใช้ค้นหาจริง" ล่าสุดจากการกดปุ่มค้นหา[cite: 9]
+  const appliedFilters = useRef({
+    dateback: 1,
+    include: '',
+    exclude: '',
+    confirm: false
+  });
+
   // ใช้ Map เพื่อเก็บ XN พร้อมสถานะล่าสุด เช่น { "123": { confirm: "N", confirm_read_film: "N" } }
   const loadedXNsMap = useRef(new Map());
   const intervalRef = useRef(null);
@@ -36,6 +44,9 @@ export default function Page() {
         setRows([]);
         loadedXNsMap.current.clear();
         setStatus('กำลังโหลดข้อมูล...');
+        
+        // อัปเดต "ค่าที่ใช้ค้นหาจริง" เมื่อผู้ใช้กดปุ่มค้นหาแบบ Manual[cite: 9]
+        appliedFilters.current = { dateback, include, exclude, confirm };
       }
 
       // จัดกลุ่ม XN
@@ -54,11 +65,12 @@ export default function Page() {
         else if (c === 'N' && crf === 'Y') xns_NY.push(xn);
       });
 
+      // ใช้ค่าจาก appliedFilters.current แทน State ของ Input ที่อาจจะกำลังพิมพ์อยู่[cite: 9]
       const requestBody = {
-        dateback: dateback || 1,
-        include,
-        exclude,
-        confirm,
+        dateback: appliedFilters.current.dateback || 1,
+        include: appliedFilters.current.include,
+        exclude: appliedFilters.current.exclude,
+        confirm: appliedFilters.current.confirm,
         lang,
         existingXNs,
         xns_NN,

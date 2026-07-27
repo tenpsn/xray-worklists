@@ -6,6 +6,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const DEFAULT_FORM = {
   his: {
+    hisSystem: '', // 'hosxp' | 'softcon'
     dbType: '',
     host: '',
     port: '',
@@ -19,7 +20,7 @@ const DEFAULT_FORM = {
     hl7Port: '2575',
     lang: 'th', // ภาษาเริ่มต้นสำหรับออเดอร์ที่รับผ่าน hl7
     aet: 'ORTHANC', // AET ของ Worklist Server เช่น Orthanc
-    port: '7000', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
+    port: '4242', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
     mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
   },
@@ -31,6 +32,7 @@ export default function SettingsPage() {
   const [statusType, setStatusType] = useState('info');
   const [saving, setSaving] = useState(false);
   const [worklistDirActive, setWorklistDirActive] = useState('');
+  const [detecting, setDetecting] = useState(false);
 
   // state สำหรับหน้าต่างเลือกโฟลเดอร์ worklists
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -69,6 +71,17 @@ export default function SettingsPage() {
 
   function updateHis(field, value) {
     setForm((prev) => ({ ...prev, his: { ...prev.his, [field]: value } }));
+  }
+
+  function updateHisSystem(system) {
+    setForm((prev) => ({
+      ...prev,
+      his: {
+        ...prev.his,
+        hisSystem: system,
+        dbType: (system === 'hosxp' && prev.his.dbType === 'mssql') ? 'mysql' : prev.his.dbType,
+      },
+    }));
   }
 
   function updateMwl(field, value) {
@@ -132,7 +145,38 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleDetectSystem() {
+    setDetecting(true);
+    setStatus('กำลังตรวจสอบระบบ HIS จากฐานข้อมูล...');
+    setStatusType('info');
+    try {
+      const res = await fetch(`${API_URL}/api/settings/detect-his-system`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ his: form.his }),
+      });
+      const json = await res.json();
+      if (json.success && json.detected) {
+        updateHisSystem(json.detected);
+      }
+      setStatus(json.message);
+      setStatusType(json.success && json.detected ? 'success' : 'error');
+    } catch (err) {
+      setStatus('เชื่อมต่อ server ไม่ได้: ' + err.message);
+      setStatusType('error');
+    } finally {
+      setDetecting(false);
+    }
+  }
+
   async function handleSave() {
+
+    if (!form.his.hisSystem || !form.his.dbType) {
+      setStatus('กรุณาเลือกระบบ HIS และ Database Type ให้ครบถ้วน');
+      setStatusType('error');
+      return;
+    }
+
     setSaving(true);
     setStatus('กำลังบันทึกและทดสอบการเชื่อมต่อ...');
     setStatusType('info');
@@ -163,15 +207,31 @@ export default function SettingsPage() {
         <h2>HIS — Database</h2>
         <div className="settings-grid">
           <label>
+            ระบบ HIS
+            <select
+              value={form.his.hisSystem}
+              onChange={(e) => updateHisSystem(e.target.value)}
+            >
+              <option value="" disabled>-- เลือกระบบ HIS --</option>
+              <option value="hosxp">HOSxP</option>
+              <option value="softcon">SoftCon</option>
+            </select>
+          </label>
+
+          <label>
             Database Type
             <select
               value={form.his.dbType}
               onChange={(e) => updateHis('dbType', e.target.value)}
             >
+              <option value="" disabled>-- เลือก Database Type --</option>
               <option value="mysql">MySQL</option>
-              <option value="postgres">Postgres</option>
-              <option value="mssql">MS SQL Server</option>
+              <option value="postgres">PostgresSQL</option>
+              {form.his.hisSystem === 'softcon' && <option value="mssql">MSSQL</option>}
             </select>
+            {form.his.hisSystem === 'hosxp' && (
+              <small>HOSxP ไม่รองรับ MS SQL</small>
+            )}
           </label>
 
           <label>

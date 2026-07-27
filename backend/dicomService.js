@@ -192,10 +192,9 @@ async function generateWorklistFile(item) {
   ensureWorklistCleanupForToday(); // เช็คว่าเปลี่ยนวันปฏิทินหรือยัง ถ้าเปลี่ยนแล้วรัน cleanup ไฟล์ .wl ค้างไปด้วย
   return new Promise((resolve, reject) => {
     try {
-      const accessionNumber = item.xn || `XN${Date.now()}`;
-
-      // สร้างชื่อไฟล์ที่ปลอดภัย โดยแทนที่ /, \, : ด้วยขีดกลาง (-)
-      const safeFileName = sanitizeFileName(accessionNumber);
+      const rawXn = item.xn || `XN${Date.now()}`;
+      const accessionNumber = sanitizeFileName(rawXn); 
+      const safeFileName = accessionNumber;
 
       const patientId = item.hn || 'UNKNOWN';
       const useEnglish = item.lang === 'en';
@@ -222,7 +221,7 @@ async function generateWorklistFile(item) {
       const currentHash = computeItemHash(item);
       const previousHash = getPreviousHash(accessionNumber);
       if (previousHash === currentHash && fs.existsSync(wlFilePathCheck)) {
-        console.log(`[DICOM Service] ---> ข้ามไฟล์ เพราะไม่มีการเปลี่ยนแปลง: ${wlFilePathCheck}`);
+        // console.log(`[DICOM Service] ---> ข้ามไฟล์ เพราะไม่มีการเปลี่ยนแปลง: ${wlFilePathCheck}`);
         return resolve({ success: true, file: wlFilePathCheck, skipped: true });
       }
 
@@ -317,9 +316,19 @@ function deleteWorklistFile(xn) {
       console.error(`[DICOM Service] ---> ลบไฟล์ไม่สำเร็จ: ${safeFileName}.wl`, err);
     }
   }
-  // ล้าง state ทิ้งด้วย เผื่อ XN นี้กลับมาใหม่ในอนาคต
+  
+  // ล้าง state ทิ้งด้วย โดยลบทั้งรูปแบบที่มี / และ - เพื่อความชัวร์
+  let stateChanged = false;
   if (worklistState[xn] !== undefined) {
     delete worklistState[xn];
+    stateChanged = true;
+  }
+  if (worklistState[safeFileName] !== undefined) {
+    delete worklistState[safeFileName];
+    stateChanged = true;
+  }
+  
+  if (stateChanged) {
     saveState();
   }
 }

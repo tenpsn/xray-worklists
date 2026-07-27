@@ -185,9 +185,85 @@ function friendlyErrorMessage(err) {
   }
 }
 
+
+async function detectHisSystem(his) {
+  const dbType = his.dbType || 'postgres';
+
+  if (dbType === 'mysql') {
+    const mysql = require('mysql2/promise');
+    const conn = await mysql.createConnection({
+      host: his.host,
+      port: Number(his.port) || 3306,
+      database: his.database,
+      user: his.username,
+      password: his.password,
+      charset: mapEncodingToMysqlCharset(his.encoding),
+      connectTimeout: 5000,
+    });
+    try {
+      const [rows] = await conn.query(
+        `SELECT
+          (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'xray_report') AS existsHosxp,
+          (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'RadRequestHeader') AS existsSoftcon`
+      );
+      return { existsHosxp: rows[0].existsHosxp > 0, existsSoftcon: rows[0].existsSoftcon > 0 };
+    } finally {
+      await conn.end().catch(() => {});
+    }
+  }
+
+  if (dbType === 'mssql') {
+    const sql = require('mssql');
+    const config = {
+      user: his.username,
+      password: his.password,
+      server: his.host,
+      port: Number(his.port) || 1433,
+      database: his.database,
+      options: { encrypt: false, trustServerCertificate: true, enableArithAbort: true, connectTimeout: 5000 },
+    };
+    const poolObj = new sql.ConnectionPool(config);
+    const conn = await poolObj.connect();
+    try {
+      const result = await conn.request().query(
+        `SELECT
+          (SELECT COUNT(*) FROM sys.tables WHERE name = 'xray_report') AS existsHosxp,
+          (SELECT COUNT(*) FROM sys.tables WHERE name = 'RadRequestHeader') AS existsSoftcon`
+      );
+      const row = result.recordset[0];
+      return { existsHosxp: row.existsHosxp > 0, existsSoftcon: row.existsSoftcon > 0 };
+    } finally {
+      await conn.close().catch(() => {});
+    }
+  }
+
+  // postgres (ค่าเริ่มต้น)
+  const { Client } = require('pg');
+  const client = new Client({
+    host: his.host,
+    port: Number(his.port) || 5432,
+    database: his.database,
+    user: his.username,
+    password: his.password,
+    connectionTimeoutMillis: 5000,
+  });
+  await client.connect();
+  try {
+    const result = await client.query(
+      `SELECT
+        (to_regclass('xray_report') IS NOT NULL) AS "existsHosxp",
+        (to_regclass('"RadRequestHeader"') IS NOT NULL) AS "existsSoftcon"`
+    );
+    return result.rows[0];
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 module.exports = { 
   initPool, 
   query, 
   getType, 
-  friendlyErrorMessage 
+  friendlyErrorMessage,
+  detectHisSystem,
 };
