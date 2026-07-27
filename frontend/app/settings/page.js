@@ -17,11 +17,11 @@ const DEFAULT_FORM = {
   },
   mwl: {
     usehl7: false,
-    hl7Port: '2575',
-    lang: 'th', // ภาษาเริ่มต้นสำหรับออเดอร์ที่รับผ่าน hl7
-    aet: 'ORTHANC', // AET ของ Worklist Server เช่น Orthanc
-    port: '4242', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
-    mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
+    hl7Port: '',
+    lang: '', // ภาษาเริ่มต้นสำหรับออเดอร์ที่รับผ่าน hl7
+    aet: '', // AET ของ Worklist Server เช่น Orthanc
+    port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
+    mppsPort: '', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
   },
 };
@@ -212,26 +212,23 @@ export default function SettingsPage() {
               value={form.his.hisSystem}
               onChange={(e) => updateHisSystem(e.target.value)}
             >
-              <option value="" disabled>-- เลือกระบบ HIS --</option>
+              <option value="" disabled>-- Select HIS --</option>
               <option value="hosxp">HOSxP</option>
               <option value="softcon">SoftCon</option>
             </select>
           </label>
 
           <label>
-            Database Type
+            Database
             <select
               value={form.his.dbType}
               onChange={(e) => updateHis('dbType', e.target.value)}
             >
-              <option value="" disabled>-- เลือก Database Type --</option>
+              <option value="" disabled>-- Select Database --</option>
               <option value="mysql">MySQL</option>
               <option value="postgres">PostgresSQL</option>
               {form.his.hisSystem === 'softcon' && <option value="mssql">MSSQL</option>}
             </select>
-            {form.his.hisSystem === 'hosxp' && (
-              <small>HOSxP ไม่รองรับ MS SQL</small>
-            )}
           </label>
 
           <label>
@@ -248,7 +245,7 @@ export default function SettingsPage() {
             Port
             <input
               type="text"
-              placeholder="เช่น 5432 หรือ 3306"
+              placeholder="เช่น 5432"
               value={form.his.port}
               onChange={(e) => updateHis('port', e.target.value)}
             />
@@ -258,7 +255,7 @@ export default function SettingsPage() {
             Database name
             <input
               type="text"
-              placeholder="ชื่อฐานข้อมูล"
+              placeholder="Database"
               value={form.his.database}
               onChange={(e) => updateHis('database', e.target.value)}
             />
@@ -268,6 +265,7 @@ export default function SettingsPage() {
             Username
             <input
               type="text"
+              placeholder="Username"
               value={form.his.username}
               onChange={(e) => updateHis('username', e.target.value)}
             />
@@ -277,6 +275,7 @@ export default function SettingsPage() {
             Password
             <input
               type="password"
+              placeholder="Password"
               value={form.his.password}
               onChange={(e) => updateHis('password', e.target.value)}
             />
@@ -347,7 +346,7 @@ export default function SettingsPage() {
             Port
             <input
               type="text"
-              placeholder="เช่น 7000"
+              placeholder="เช่น 4242"
               value={form.mwl.port}
               onChange={(e) => updateMwl('port', e.target.value)}
             />
@@ -357,7 +356,7 @@ export default function SettingsPage() {
             MPPS Port
             <input
               type="text"
-              placeholder="เช่น 7001"
+              placeholder="เช่น 7000"
               value={form.mwl.mppsPort}
               onChange={(e) => updateMwl('mppsPort', e.target.value)}
             />

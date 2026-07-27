@@ -20,7 +20,7 @@ function safeRomanize(text) {
 }
 
 function sanitizeFileName(accessionNumber) {
-  return String(accessionNumber).replace(/[\\/:]/g, '-');
+  return String(accessionNumber).replace(/[\\/:_]/g, '-');
 }
 
 // สำหรับชื่อแพทย์ที่มีคำนำหน้าติดอยู่ในสตริงเดียวกัน เช่น พญ.พิมพ์ชนก
@@ -196,7 +196,8 @@ async function generateWorklistFile(item) {
       const accessionNumber = sanitizeFileName(rawXn); 
       const safeFileName = accessionNumber;
 
-      const patientId = item.hn || 'UNKNOWN';
+      const rawPatientId = item.hn || 'UNKNOWN';
+      const patientId = sanitizeFileName(rawPatientId);
       const useEnglish = item.lang === 'en';
 
       // ถ้าเลือกภาษาอังกฤษ ให้แปลงชื่อ-นามสกุลผู้ป่วยเป็นอังกฤษ / ชื่อแพทย์ คงคำนำหน้าไทยไว้
