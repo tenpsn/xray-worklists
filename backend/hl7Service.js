@@ -1,6 +1,7 @@
 const net = require('net');
 const dicomService = require('./dicomService');
-const settingsService = require('./settingsService');
+
+let getDisplayLang = () => 'th';
 
 // ตัวอักษรพิเศษสำหรับ MLLP Protocol (มาตรฐานการส่ง hl7 ผ่าน TCP)
 const VT = String.fromCharCode(0x0b); // Start block
@@ -59,8 +60,7 @@ function parsehl7ToWorklistItem(hl7Data) {
 
   // ใช้ mwl.lang ที่ตั้งไว้ในหน้า Settings เป็นค่าเริ่มต้นของภาษาแสดงผล
   // (โหมด hl7 ไม่มี request จากหน้าเว็บมากำหนด lang ต่อครั้งเหมือนโหมดดึงจาก DB ปกติ)
-  const currentSettings = settingsService.loadSettings();
-  const displayLang = currentSettings.mwl.lang === 'en' ? 'en' : 'th';
+  const displayLang = getDisplayLang() === 'en' ? 'en' : 'th';
 
   // แกะข้อมูลคนไข้ (PID)
   const patientId = (pid[3] || '').split('^')[0]; // HN
@@ -103,9 +103,13 @@ function parsehl7ToWorklistItem(hl7Data) {
 
 let server = null;
 
-function starthl7Server(port = 2575) {
+function starthl7Server(port = 2575, getLang) {
   if (server) {
     server.close();
+  }
+
+  if (typeof getLang === 'function') {
+    getDisplayLang = getLang;
   }
 
   // ประมวลผลข้อความ hl7 1 ก้อน (ไม่รวม VT/FS/CR ที่ครอบอยู่) แล้วตอบ ACK/NAK กลับไปที่ socket

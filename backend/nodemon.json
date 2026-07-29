@@ -1,0 +1,11 @@
+{
+  "ignore": [
+    "worklists/**",
+    "logs/**",
+    "*.wl",
+    "*.dump",
+    ".worklist-state.json",
+    "mpps-state.json",
+    "settings.json"
+  ]
+}

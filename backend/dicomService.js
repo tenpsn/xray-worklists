@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const romanizeModule = require('@dehoist/romanize-thai');
 const romanize = typeof romanizeModule === 'function' ? romanizeModule : romanizeModule.default;
 
@@ -44,6 +44,21 @@ function generateStudyInstanceUID() {
   return `2.25.${decimal}`;
 }
 
+// ค่าเริ่มต้น ถ้าไม่ได้ตั้งค่าโฟลเดอร์ worklists จะอยู่ใน backend
+const DEFAULT_WORKLIST_DIR = path.join(__dirname, 'worklists');
+
+// เปลี่ยน worklists ได้จากหน้าเว็บ
+let WORKLIST_DIR = DEFAULT_WORKLIST_DIR;
+let STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
+
+let worklistState = {};
+
+// อายุไฟล์ .wl 
+const WORKLIST_RETENTION_DAYS = 7;
+
+// เก็บวันที่ (YYYY-MM-DD) ของครั้งล่าสุดที่รัน cleanup
+let lastWorklistCleanupDateKey = null;
+
 // StudyInstanceUID ต้องคงที่ตลอดอายุของ 1 accession number
 // จึงต้องเก็บไว้ใน state แล้วใช้ตัวเดิมซ้ำ ถ้ายังไม่เคยมีให้สุ่มสร้างใหม่ครั้งเดียว
 function getOrCreateStudyInstanceUID(accessionNumber) {
@@ -60,21 +75,6 @@ function getPreviousHash(accessionNumber) {
   if (entry && typeof entry === 'object') return entry.hash;
   return entry;
 }
-// ค่าเริ่มต้น ถ้าไม่ได้ตั้งค่าอื่นไว้ผ่านหน้าเว็บ — โฟลเดอร์ worklists จะอยู่ใน backend
-const DEFAULT_WORKLIST_DIR = path.join(__dirname, 'worklists');
-
-// โฟลเดอร์ worklists เปลี่ยนได้เมื่อผู้ใช้ตั้งค่าใหม่จากหน้าเว็บ
-let WORKLIST_DIR = DEFAULT_WORKLIST_DIR;
-let STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
-
-// เก็บ state hash + StudyInstanceUID ของแต่ละ XN ไว้ใน memory ตลอดอายุของโปรเซส
-let worklistState = {};
-
-// ไฟล์ .wl เกิน 7 วัน
-const WORKLIST_RETENTION_DAYS = 7;
-
-// เก็บวันที่ (YYYY-MM-DD) ของครั้งล่าสุดที่รัน cleanup
-let lastWorklistCleanupDateKey = null;
 
 function ensureDirExists(dir) {
   if (!fs.existsSync(dir)) {
@@ -97,11 +97,14 @@ function loadStateFromDisk() {
   }
 }
 
-// เตรียมโฟลเดอร์ default ไว้ตั้งแต่ตอนโหลดโมดูล เผื่อยังไม่มีการเรียก setWorklistDir
-ensureDirExists(WORKLIST_DIR);
-loadStateFromDisk();
-
-ensureWorklistCleanupForToday();
+// บันทึก state ลงไฟล์
+function saveState() {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(worklistState), 'utf8');
+  } catch (err) {
+    console.warn('[DICOM Service] ---> ไม่สามารถบันทึก state file ได้:', err.message);
+  }
+}
 
 // เปลี่ยนโฟลเดอร์เก็บไฟล์ worklist ตามค่าที่ตั้งไว้จากหน้า Settings
 // - ถ้าไม่ได้ระบุกลับไปใช้ค่า default backend/worklists
@@ -126,15 +129,6 @@ function setWorklistDir(dirPath) {
 
 function getWorklistDir() {
   return WORKLIST_DIR;
-}
-
-// บันทึก state ลงไฟล์
-function saveState() {
-  try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(worklistState), 'utf8');
-  } catch (err) {
-    console.warn('[DICOM Service] ---> ไม่สามารถบันทึก state file ได้:', err.message);
-  }
 }
 
 // สร้าง hash จากข้อมูลที่มีผลต่อเนื้อหาไฟล์ worklist เพื่อใช้เทียบว่าข้อมูลเปลี่ยนไปหรือยัง
@@ -162,7 +156,7 @@ function formatDicomDate(dateStr) {
   const year = d.getFullYear();
   const month = ('0' + (d.getMonth() + 1)).slice(-2);
   const day = ('0' + d.getDate()).slice(-2);
-  
+
   return `${year}${month}${day}`;
 }
 
@@ -187,13 +181,67 @@ function safeDeleteDumpFile(filePath, attempt = 1) {
   }
 }
 
+// ลบไฟล์ .wl
+function cleanupStaleWorklists() {
+  try {
+    const files = fs.readdirSync(WORKLIST_DIR).filter((f) => f.endsWith('.wl'));
+    const now = Date.now();
+    const maxAgeMs = WORKLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let deletedCount = 0;
+
+    const fileNameToXn = {};
+    Object.keys(worklistState).forEach((xn) => {
+      fileNameToXn[`${sanitizeFileName(xn)}.wl`] = xn;
+    });
+
+    let changed = false;
+    files.forEach((file) => {
+      const filePath = path.join(WORKLIST_DIR, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtimeMs > maxAgeMs) {
+          if (deletedCount === 0) {
+            console.log(`[DICOM Service] ---> [Cleanup] เริ่มดำเนินการลบไฟล์ worklist เกิน ${WORKLIST_RETENTION_DAYS} วัน`);
+          }
+          fs.unlinkSync(filePath);
+          console.log(`[DICOM Service] ---> ลบไฟล์ worklist : ${file}`);
+
+          const xn = fileNameToXn[file];
+          if (xn && worklistState[xn] !== undefined) {
+            delete worklistState[xn];
+            changed = true;
+          }
+          deletedCount += 1;
+        }
+      } catch (err) {
+        console.warn(`[DICOM Service] ---> ตรวจสอบ/ลบไฟล์ ${file} ไม่สำเร็จ :`, err.message);
+      }
+    });
+
+    if (changed) saveState();
+    if (deletedCount > 0) {
+      console.log(`[DICOM Service] ---> [Cleanup] ดำเนินการเสร็จสิ้น พบไฟล์ทั้งหมด ${files.length} ไฟล์ ลบไป ${deletedCount} ไฟล์`);
+    }
+  } catch (err) {
+    console.warn('[DICOM Service] ---> รัน cleanup ไฟล์ worklist ค้างไม่สำเร็จ:', err.message);
+  }
+}
+
+function ensureWorklistCleanupForToday() {
+  const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  if (lastWorklistCleanupDateKey === todayKey) return;
+
+  lastWorklistCleanupDateKey = todayKey;
+  cleanupStaleWorklists();
+}
+
 // สร้างไฟล์ Worklist (.dump และ .wl) สำหรับ Orthanc
 async function generateWorklistFile(item) {
   ensureWorklistCleanupForToday(); // เช็คว่าเปลี่ยนวันปฏิทินหรือยัง ถ้าเปลี่ยนแล้วรัน cleanup ไฟล์ .wl ค้างไปด้วย
   return new Promise((resolve, reject) => {
     try {
       const rawXn = item.xn || `XN${Date.now()}`;
-      const accessionNumber = sanitizeFileName(rawXn); 
+      const accessionNumber = sanitizeFileName(rawXn);
       const safeFileName = accessionNumber;
 
       const rawPatientId = item.hn || 'UNKNOWN';
@@ -230,7 +278,7 @@ async function generateWorklistFile(item) {
       const studyTime = formatDicomTime(item.StudyTime);
       const dob = formatDicomDate(item.birthday);
       const sex = item.sex === '1' ? 'M' : item.sex === '2' ? 'F' : 'O';
-      
+
       // ตัวอย่างข้อมูล รูปแบบไฟล์ .dump
       const dumpContent = `
 (0008,0005) CS [ISO_IR 192] # Specific Character Set (บอกว่าเป็น UTF-8)
@@ -263,7 +311,7 @@ async function generateWorklistFile(item) {
       // ใช้ safeFileName ในการสร้างไฟล์
       const dumpFileName = `${safeFileName}.dump`;
       const wlFileName = `${safeFileName}.wl`;
-      
+
       const dumpFilePath = path.join(WORKLIST_DIR, dumpFileName);
       const wlFilePath = path.join(WORKLIST_DIR, wlFileName);
 
@@ -272,9 +320,7 @@ async function generateWorklistFile(item) {
 
       // 2. ใช้คำสั่ง dump2dcm เพื่อแปลง .dump เป็น .wl
       const dcmtkPath = path.join(__dirname, 'dcmtk', 'bin', 'dump2dcm.exe');
-      const command = `"${dcmtkPath}" "${dumpFilePath}" "${wlFilePath}"`;
-      
-      exec(command, (error, stdout, stderr) => {
+      execFile(dcmtkPath, [dumpFilePath, wlFilePath], (error, stdout, stderr) => {
         try {
           if (error) {
             console.warn(`[DICOM Service] ---> Warning: ไม่สามารถแปลงไฟล์ .wl ได้: ${error.message}`);
@@ -317,7 +363,7 @@ function deleteWorklistFile(xn) {
       console.error(`[DICOM Service] ---> ลบไฟล์ไม่สำเร็จ: ${safeFileName}.wl`, err);
     }
   }
-  
+
   // ล้าง state ทิ้งด้วย โดยลบทั้งรูปแบบที่มี / และ - เพื่อความชัวร์
   let stateChanged = false;
   if (worklistState[xn] !== undefined) {
@@ -328,66 +374,16 @@ function deleteWorklistFile(xn) {
     delete worklistState[safeFileName];
     stateChanged = true;
   }
-  
+
   if (stateChanged) {
     saveState();
   }
 }
 
-// ลบไฟล์ .wl
-function cleanupStaleWorklists() {
-  try {
-    const files = fs.readdirSync(WORKLIST_DIR).filter((f) => f.endsWith('.wl'));
-    const now = Date.now();
-    const maxAgeMs = WORKLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    let deletedCount = 0;
-
-    // เตรียม map: ชื่อไฟล์ (sanitize แล้ว) -> XN เดิม เผื่อต้องล้าง state ทิ้งด้วย
-    const fileNameToXn = {};
-    Object.keys(worklistState).forEach((xn) => {
-      fileNameToXn[`${sanitizeFileName(xn)}.wl`] = xn;
-    });
-
-    let changed = false;
-    files.forEach((file) => {
-      const filePath = path.join(WORKLIST_DIR, file);
-      try {
-        const stats = fs.statSync(filePath);
-        if (now - stats.mtimeMs > maxAgeMs) {
-          if (deletedCount === 0) {
-            console.log(`[DICOM Service] ---> [Cleanup] เริ่มดำเนินการลบไฟล์ worklist อายุเกิน ${WORKLIST_RETENTION_DAYS} วัน`);
-          }
-          fs.unlinkSync(filePath);
-            console.log(`[DICOM Service] ---> ลบไฟล์ worklist อายุเกิน 7 วัน: ${file}`);
-
-          const xn = fileNameToXn[file];
-          if (xn && worklistState[xn] !== undefined) {
-            delete worklistState[xn];
-            changed = true;
-          }
-          deletedCount += 1;
-        }
-      } catch (err) {
-        console.warn(`[DICOM Service] ---> ตรวจสอบ/ลบไฟล์ ${file} ไม่สำเร็จ:`, err.message);
-      }
-    });
-
-    if (changed) saveState();
-      if (deletedCount > 0) {
-        console.log(`[DICOM Service] ---> [Cleanup] ดำเนินการเสร็จสิ้น พบไฟล์ทั้งหมด ${files.length} ไฟล์ ลบไป ${deletedCount} ไฟล์`);
-      }
-  } catch (err) {
-    console.warn('[DICOM Service] ---> รัน cleanup ไฟล์ worklist ค้างไม่สำเร็จ:', err.message);
-  }
-}
-
-function ensureWorklistCleanupForToday() {
-  const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  if (lastWorklistCleanupDateKey === todayKey) return;
-
-  lastWorklistCleanupDateKey = todayKey;
-  cleanupStaleWorklists();
-}
+// เตรียมโฟลเดอร์ default ไว้ตั้งแต่ตอนโหลดโมดูล เผื่อยังไม่มีการเรียก setWorklistDir
+ensureDirExists(WORKLIST_DIR);
+loadStateFromDisk();
+ensureWorklistCleanupForToday();
 
 module.exports = {
   generateWorklistFile,

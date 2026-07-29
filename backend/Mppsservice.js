@@ -44,14 +44,14 @@ function cleanupOldLogs() {
       if (ageDays > LOG_RETENTION_DAYS) {
         try {
           fs.unlinkSync(path.join(LOG_DIR, file));
-          console.log(`[MPPS] ---> ลบไฟล์ log อายุเกิน 7 วัน: ${file}`);
+          console.log(`[MPPS] ---> ลบไฟล์ log : ${file}`);
         } catch (err) {
           // ข้ามไฟล์นี้ไป ไม่ทำให้ cleanup ไฟล์อื่นพังตาม
         }
       }
     });
   } catch (err) {
-    console.warn('[MPPS] ---> ลบไฟล์ log อายุเกิน 7 วันไม่สำเร็จ:', err.message);
+    console.warn('[MPPS] ---> ลบไฟล์ log ไม่สำเร็จ :', err.message);
   }
 }
 

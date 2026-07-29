@@ -43,28 +43,11 @@ app.use(cors({ origin: CORS_ORIGIN }));
 // รับข้อมูลแบบ JSON
 app.use(express.json());
 
-// โหลดการตั้งค่า (HIS MWL) 
+// โหลดการตั้งค่า (HIS MWL)
 let currentSettings = settingsService.loadSettings();
 
-// เช็คว่ามีการตั้งค่า Host และ Database แล้วหรือยังก่อนจะเชื่อมต่อ
-let dbReadyPromise = Promise.resolve();
-if (currentSettings.his && currentSettings.his.host && currentSettings.his.database) {
-  dbReadyPromise = db.initPool(currentSettings).catch(err => {
-    console.error('[DB] ---> สตาร์ทเซิร์ฟเวอร์เชื่อมต่อ DB ไม่สำเร็จ:', err.message);
-  });
-} else {
-  console.log('[Server] ---> ยังไม่ได้ตั้งค่าฐานข้อมูล รอการตั้งค่าจากหน้าเว็บ');
-}
-
-// เพิ่มตัวแปรเช็คสถานะ hl7
+// ตัวแปรเช็คสถานะ hl7
 let ishl7Enabled = currentSettings.mwl.usehl7 === true;
-
-// ตั้งค่าโฟลเดอร์เก็บไฟล์ worklist ตามค่าที่บันทึกไว้ ถ้าไม่ได้ตั้ง จะใช้ backend/worklists
-try {
-  dicomService.setWorklistDir(currentSettings.mwl.worklistDir);
-} catch (err) {
-  console.error('[Server] ---> ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ ใช้โฟลเดอร์เดิมต่อไป:', err.message);
-}
 
 // เพิ่มตัวแปรสำหรับจดจำ XN ที่ถ่ายเสร็จแล้ว
 const mppsCompletedXNs = new Set();
@@ -80,19 +63,12 @@ function handleMppsStatusChange(accessionNumber, status) {
   }
 }
 
-try {
-  Mppsservice.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
-} catch (err) {
-  console.error('[Server] ---> เริ่ม MPPS server ไม่สำเร็จตอนสตาร์ท ปิดโปรแกรม:', err.message);
-  process.exit(1);
-}
-
 function managehl7Service(settings) {
   ishl7Enabled = settings.mwl.usehl7 === true; // อัปเดตสถานะตรงนี้
-  
+
   if (ishl7Enabled) {
     const hl7Port = settings.mwl.hl7Port;
-    hl7Service.starthl7Server(hl7Port);
+    hl7Service.starthl7Server(hl7Port, () => currentSettings.mwl.lang);
     console.log('[Server] ---> เปิดใช้งาน HL7 ปิดการดึงข้อมูลจาก DB');
   } else {
     hl7Service.stophl7Server();
@@ -100,7 +76,73 @@ function managehl7Service(settings) {
   }
 }
 
-managehl7Service(currentSettings);
+async function applySettings(settings, options = {}) {
+  const { exitOnMppsFailure = false, restartAutoGenLoop = true } = options;
+  const warnings = [];
+  let dbError = null;
+  let dbSkipped = false;
+
+  // 1. HL7 listener เปิด/ปิดตามค่า mwl.usehl7
+  managehl7Service(settings);
+
+  // 2. โฟลเดอร์เก็บไฟล์ worklist
+  try {
+    dicomService.setWorklistDir(settings.mwl.worklistDir);
+  } catch (err) {
+    console.error('[Settings] ---> ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ:', err);
+    warnings.push(`ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${err.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${dicomService.getWorklistDir()}`);
+  }
+
+  // 3. MPPS server
+  try {
+    Mppsservice.startMppsServer(settings.mwl.mppsPort || 7001, handleMppsStatusChange);
+  } catch (err) {
+    if (exitOnMppsFailure) {
+      console.error('[Server] ---> เริ่ม MPPS server ไม่สำเร็จตอนสตาร์ท ปิดโปรแกรม:', err.message);
+      process.exit(1);
+    }
+    console.error('[Settings] ---> เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ:', err.message);
+    warnings.push(`เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ - ${err.message} ระบบจะยังไม่รับสถานะ MPPS จากเครื่อง Modality จนกว่าจะแก้ port ให้ถูกต้อง`);
+  }
+
+  // 4. เชื่อมต่อฐานข้อมูล HIS
+  const hisConfig = settings.his || {};
+  if (hisConfig.host && hisConfig.database) {
+    try {
+      await db.initPool(settings);
+    } catch (err) {
+      console.error('[Settings] ---> เชื่อมต่อฐานข้อมูลด้วยค่าใหม่ไม่สำเร็จ:', err.message);
+      dbError = err;
+    }
+
+    // ทดสอบว่าต่อฐานข้อมูลได้จริงหรือไม่
+    if (!dbError) {
+      try {
+        await db.query('SELECT 1');
+      } catch (err) {
+        console.error('[Settings] ---> ทดสอบเชื่อมต่อฐานข้อมูลไม่สำเร็จ:', err);
+        dbError = err;
+      }
+    }
+  } else {
+    dbSkipped = true;
+    console.log('[Server] ---> ยังไม่ได้ตั้งค่าฐานข้อมูล รอการตั้งค่าจากหน้าเว็บ');
+  }
+
+  // 5. รีสตาร์ท background loop สร้างไฟล์ .wl อัตโนมัติ
+  if (restartAutoGenLoop) {
+    startAutoWorklistLoop();
+  }
+
+  return { dbError, dbSkipped, warnings };
+}
+
+let dbReadyPromise = applySettings(currentSettings, {
+  exitOnMppsFailure: true,
+  restartAutoGenLoop: false,
+}).catch((err) => {
+  console.error('[Server] ---> เริ่มต้นระบบไม่สำเร็จ:', err);
+});
 
 process.on('uncaughtException', (err) => {
   console.error('[Server] ---> Uncaught Exception ปิดโปรแกรมเพื่อความปลอดภัย ให้ PM2 restart:', err);
@@ -119,6 +161,24 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// สร้างเงื่อนไข LIKE / NOT LIKE
+function buildLikeClause(state, column, value, negate = false) {
+  if (!value || value.trim() === '') return null;
+  const clause = `${column} ${negate ? 'NOT LIKE' : 'LIKE'} $${state.paramIndex}`;
+  state.params.push(`%${value}%`);
+  state.paramIndex++;
+  return clause;
+}
+
+// สร้างเงื่อนไข IN / NOT IN
+function buildInClause(state, column, values, negate = false) {
+  if (!values || values.length === 0) return null;
+  const placeholders = values.map((_, i) => `$${state.paramIndex + i}`).join(', ');
+  state.params.push(...values);
+  state.paramIndex += values.length;
+  return `${column} ${negate ? 'NOT IN' : 'IN'} (${placeholders})`;
+}
+
 // dbType (postgres/mysql/mssql) เลือก "ภาษา SQL" ที่ถูกต้องของแต่ละฐานข้อมูล
 // - hosxp   -> ต่อได้เฉพาะ mysql/postgres (HOSxP ไม่รองรับ MSSQL)
 // - softcon -> ต่อได้ทั้ง mysql/postgres/mssql
@@ -131,28 +191,27 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
 
 // SoftCon - schema แบบ RadRequestHeader/RadRequest/Patient/Person/Visit
 function buildSoftconQuery(dateback, include, exclude, existingXNs, dbType) {
-  const params = [];
-  let paramIndex = 1;
+  const state = { params: [], paramIndex: 1 };
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 0;
 
   // ส่วนที่ต่างกันตามฐานข้อมูลแต่ละตัว (วันที่/เวลา/แปลงชนิดข้อมูล)
   let dateWindow, birthdayExpr, studyDateExpr, studyTimeExpr, genderCastType;
-  
+
   if (dbType === 'mysql') {
-    dateWindow = `DATEDIFF(CURDATE(), rrh.IssueDT) BETWEEN 0 AND $${paramIndex}`;
+    dateWindow = `DATEDIFF(CURDATE(), rrh.IssueDT) BETWEEN 0 AND $${state.paramIndex}`;
     birthdayExpr = `DATE_FORMAT(p.BirthDT, '%Y-%m-%d')`;
     studyDateExpr = `DATE_FORMAT(rrh.IssueDT, '%Y-%m-%d')`;
     studyTimeExpr = `DATE_FORMAT(rrh.IssueDT, '%H:%i:%s')`;
     genderCastType = 'CHAR';
   } else if (dbType === 'mssql') {
-    dateWindow = `DATEDIFF(day, rrh.IssueDT, GETDATE()) BETWEEN 0 AND $${paramIndex}`;
+    dateWindow = `DATEDIFF(day, rrh.IssueDT, GETDATE()) BETWEEN 0 AND $${state.paramIndex}`;
     birthdayExpr = `CONVERT(varchar(10), p.BirthDT, 23)`;
     studyDateExpr = `CONVERT(varchar(10), rrh.IssueDT, 23)`;
     studyTimeExpr = `CONVERT(varchar(8), rrh.IssueDT, 108)`;
     genderCastType = 'VARCHAR';
   } else {
     // postgres
-    dateWindow = `(CURRENT_DATE - rrh.IssueDT::date) BETWEEN 0 AND $${paramIndex}`;
+    dateWindow = `(CURRENT_DATE - rrh.IssueDT::date) BETWEEN 0 AND $${state.paramIndex}`;
     birthdayExpr = `TO_CHAR(p.BirthDT, 'YYYY-MM-DD')`;
     studyDateExpr = `TO_CHAR(rrh.IssueDT, 'YYYY-MM-DD')`;
     studyTimeExpr = `TO_CHAR(rrh.IssueDT, 'HH24:MI:SS')`;
@@ -196,47 +255,35 @@ function buildSoftconQuery(dateback, include, exclude, existingXNs, dbType) {
     WHERE ${dateWindow}
       AND rrh.IsDone = 0
   `;
-  params.push(safeDateback);
-  paramIndex++;
+  state.params.push(safeDateback);
+  state.paramIndex++;
 
-  if (include && include.trim() !== '') {
-    sql += ` AND rr.ItemName LIKE $${paramIndex}`;
-    params.push(`%${include}%`);
-    paramIndex++;
-  }
+  const includeClause = buildLikeClause(state, 'rr.ItemName', include);
+  if (includeClause) sql += ` AND ${includeClause}`;
 
-  if (exclude && exclude.trim() !== '') {
-    sql += ` AND rr.ItemName NOT LIKE $${paramIndex}`;
-    params.push(`%${exclude}%`);
-    paramIndex++;
-  }
+  const excludeClause = buildLikeClause(state, 'rr.ItemName', exclude, true);
+  if (excludeClause) sql += ` AND ${excludeClause}`;
 
-  if (existingXNs && existingXNs.length > 0) {
-    const existingPlaceholders = existingXNs.map((_, i) => `$${paramIndex + i}`).join(', ');
-    let filterSql = `v.VN NOT IN (${existingPlaceholders})`;
-    params.push(...existingXNs);
-    paramIndex += existingXNs.length;
-    sql += ` AND (${filterSql})`;
-  }
+  const notInClause = buildInClause(state, 'v.VN', existingXNs, true);
+  if (notInClause) sql += ` AND (${notInClause})`;
 
   sql += ` ORDER BY rrh.Code DESC`;
-  return { sql, params };
+  return { sql, params: state.params };
 }
 
 // HOSxP - schema แบบ xray_report/patient/xray_items/doctor/xray_head
 function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType) {
-  const params = [];
-  let paramIndex = 1;
+  const state = { params: [], paramIndex: 1 };
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 0;
 
   let dateFilter;
   if (dbType === 'mysql') {
-    dateFilter = `a.request_date BETWEEN DATE_SUB(CURDATE(), INTERVAL $${paramIndex} DAY) AND CURDATE()`;
+    dateFilter = `a.request_date BETWEEN DATE_SUB(CURDATE(), INTERVAL $${state.paramIndex} DAY) AND CURDATE()`;
   } else if (dbType === 'mssql') {
-    dateFilter = `a.request_date BETWEEN DATEADD(day, -$${paramIndex}, CAST(GETDATE() AS DATE)) AND CAST(GETDATE() AS DATE)`;
+    dateFilter = `a.request_date BETWEEN DATEADD(day, -$${state.paramIndex}, CAST(GETDATE() AS DATE)) AND CAST(GETDATE() AS DATE)`;
   } else {
     // postgres (ค่าเริ่มต้น)
-    dateFilter = `a.request_date BETWEEN current_date - $${paramIndex}::integer AND current_date`;
+    dateFilter = `a.request_date BETWEEN current_date - $${state.paramIndex}::integer AND current_date`;
   }
 
   let sql = `
@@ -254,20 +301,14 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
     WHERE ${dateFilter}
   `;
 
-  params.push(safeDateback);
-  paramIndex++;
+  state.params.push(safeDateback);
+  state.paramIndex++;
 
-  if (include && include.trim() !== '') {
-    sql += ` AND c.xray_items_name LIKE $${paramIndex}`;
-    params.push(`%${include}%`);
-    paramIndex++;
-  }
+  const includeClause = buildLikeClause(state, 'c.xray_items_name', include);
+  if (includeClause) sql += ` AND ${includeClause}`;
 
-  if (exclude && exclude.trim() !== '') {
-    sql += ` AND c.xray_items_name NOT LIKE $${paramIndex}`;
-    params.push(`%${exclude}%`);
-    paramIndex++;
-  }
+  const excludeClause = buildLikeClause(state, 'c.xray_items_name', exclude, true);
+  if (excludeClause) sql += ` AND ${excludeClause}`;
 
   if (confirm) {
     sql += ` AND a.confirm = 'N'`;
@@ -275,33 +316,24 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
 
   if (existingXNs && existingXNs.length > 0) {
     // เอา XN ที่มีอยู่แล้วตัดออกไปก่อนเป็นพื้นฐาน
-    const existingPlaceholders = existingXNs.map((_, i) => `$${paramIndex + i}`).join(', ');
-    let filterSql = `a.xn NOT IN (${existingPlaceholders})`;
-    params.push(...existingXNs);
-    paramIndex += existingXNs.length;
+    let filterSql = buildInClause(state, 'a.xn', existingXNs, true);
 
     // ถ้าหน้าบ้านมีสถานะ N,N -> จะดึงข้อมูลกลับมาก็ต่อเมื่อ DB เปลี่ยนตัวใดตัวหนึ่งเป็น Y แล้ว
-    if (xns_NN && xns_NN.length > 0) {
-      const nnPlaceholders = xns_NN.map((_, i) => `$${paramIndex + i}`).join(', ');
-      filterSql += ` OR (a.xn IN (${nnPlaceholders}) AND (COALESCE(a.confirm, 'N') = 'Y' OR COALESCE(a.confirm_read_film, 'N') = 'Y'))`;
-      params.push(...xns_NN);
-      paramIndex += xns_NN.length;
+    const nnClause = buildInClause(state, 'a.xn', xns_NN);
+    if (nnClause) {
+      filterSql += ` OR (${nnClause} AND (COALESCE(a.confirm, 'N') = 'Y' OR COALESCE(a.confirm_read_film, 'N') = 'Y'))`;
     }
-    
+
     // ถ้าหน้าบ้านมีสถานะ Y,N -> จะดึงข้อมูลกลับมาก็ต่อเมื่อ DB เปลี่ยน confirm_read_film เป็น Y แล้ว
-    if (xns_YN && xns_YN.length > 0) {
-      const ynPlaceholders = xns_YN.map((_, i) => `$${paramIndex + i}`).join(', ');
-      filterSql += ` OR (a.xn IN (${ynPlaceholders}) AND COALESCE(a.confirm_read_film, 'N') = 'Y')`;
-      params.push(...xns_YN);
-      paramIndex += xns_YN.length;
+    const ynClause = buildInClause(state, 'a.xn', xns_YN);
+    if (ynClause) {
+      filterSql += ` OR (${ynClause} AND COALESCE(a.confirm_read_film, 'N') = 'Y')`;
     }
 
     // ถ้าหน้าบ้านมีสถานะ N,Y -> จะดึงข้อมูลกลับมาก็ต่อเมื่อ DB เปลี่ยน confirm เป็น Y แล้ว
-    if (xns_NY && xns_NY.length > 0) {
-      const nyPlaceholders = xns_NY.map((_, i) => `$${paramIndex + i}`).join(', ');
-      filterSql += ` OR (a.xn IN (${nyPlaceholders}) AND COALESCE(a.confirm, 'N') = 'Y')`;
-      params.push(...xns_NY);
-      paramIndex += xns_NY.length;
+    const nyClause = buildInClause(state, 'a.xn', xns_NY);
+    if (nyClause) {
+      filterSql += ` OR (${nyClause} AND COALESCE(a.confirm, 'N') = 'Y')`;
     }
 
     sql += ` AND (${filterSql})`;
@@ -309,7 +341,7 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
 
   sql += ` ORDER BY a.request_date DESC, a.request_time DESC`;
 
-  return { sql, params };
+  return { sql, params: state.params };
 }
 
 app.get('/health', async (req, res) => {
@@ -388,63 +420,39 @@ app.post('/api/settings', async (req, res) => {
 
     currentSettings = settingsService.saveSettings({ his: reconciledHis, mwl: reconciledMwl });
 
-    managehl7Service(currentSettings);
+    const { dbError, dbSkipped, warnings } = await applySettings(currentSettings, {
+      exitOnMppsFailure: false,
+      restartAutoGenLoop: true,
+    });
 
-    let dbConnectError = null;
-    try {
-      await db.initPool(currentSettings);
-    } catch (initErr) {
-      console.error('[Settings] ---> เชื่อมต่อฐานข้อมูลด้วยค่าใหม่ไม่สำเร็จ:', initErr.message);
-      dbConnectError = initErr;
-    }
+    const warningText = warnings.length > 0 ? ` (คำเตือน: ${warnings.join(' | ')})` : '';
 
-    // ตั้งค่าใหม่แล้ว รีสตาร์ท background loop สร้างไฟล์ .wl ให้ใช้ค่าล่าสุดทันที (interval/dbType/hisSystem/filter ที่เปลี่ยน)
-    startAutoWorklistLoop();
-
-    // สลับไปใช้โฟลเดอร์ worklist ใหม่ตามที่ตั้งค่า
-    let worklistDirWarning = '';
-    try {
-      dicomService.setWorklistDir(currentSettings.mwl.worklistDir);
-    } catch (dirErr) {
-      console.error('[Settings] ---> ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ:', dirErr);
-      worklistDirWarning = ` (คำเตือน: ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${dirErr.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${dicomService.getWorklistDir()})`;
-    }
-
-    // เริ่ม MPPS server ใหม่ด้วย port ล่าสุด — ถ้าเริ่มไม่สำเร็จ จะแจ้งเตือน
-    try {
-      Mppsservice.startMppsServer(currentSettings.mwl.mppsPort || 7001, handleMppsStatusChange);
-    } catch (mppsErr) {
-      console.error('[Settings] ---> เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ:', mppsErr.message);
-      worklistDirWarning += ` (คำเตือน: เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ - ${mppsErr.message} ระบบจะยังไม่รับสถานะ MPPS จากเครื่อง Modality จนกว่าจะแก้ port ให้ถูกต้อง)`;
-    }
-
-    // ทดสอบว่าต่อฐานข้อมูลได้จริงหรือไม่ หลังบันทึกค่าใหม่
-    if (!dbConnectError) {
-      try {
-        await db.query('SELECT 1');
-      } catch (testErr) {
-        console.error('[Settings] ---> เชื่อมต่อฐานข้อมูลไม่สำเร็จหลังบันทึกค่าใหม่:', testErr);
-        dbConnectError = testErr;
-      }
-    }
-
-    if (!dbConnectError) {
-      res.json({
+    if (dbSkipped) {
+      return res.json({
         success: true,
         settings: maskSecrets(currentSettings),
         worklistDirActive: dicomService.getWorklistDir(),
-        message: `บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ${worklistDirWarning}`,
-      });
-    } else {
-      const friendlyMessage = db.friendlyErrorMessage(dbConnectError);
-      res.json({
-        success: false,
-        settings: maskSecrets(currentSettings),
-        worklistDirActive: dicomService.getWorklistDir(),
-        message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}${worklistDirWarning}`,
-        error: dbConnectError.message,
+        message: `บันทึกการตั้งค่าเรียบร้อย กรอกข้อมูลฐานข้อมูลไม่ครบ ไม่ได้ทดสอบเชื่อมต่อ)${warningText}`,
       });
     }
+
+    if (!dbError) {
+      return res.json({
+        success: true,
+        settings: maskSecrets(currentSettings),
+        worklistDirActive: dicomService.getWorklistDir(),
+        message: `บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ${warningText}`,
+      });
+    }
+
+    const friendlyMessage = db.friendlyErrorMessage(dbError);
+    return res.json({
+      success: false,
+      settings: maskSecrets(currentSettings),
+      worklistDirActive: dicomService.getWorklistDir(),
+      message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}${warningText}`,
+      error: dbError.message,
+    });
   } catch (err) {
     console.error('[Settings] ---> บันทึกไม่สำเร็จ:', err);
     res.status(500).json({ success: false, message: 'บันทึกการตั้งค่าไม่สำเร็จ', error: err.message });
