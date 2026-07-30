@@ -204,7 +204,7 @@ function cleanupStaleWorklists() {
             console.log(`[DICOM Service] ---> [Cleanup] เริ่มดำเนินการลบไฟล์ worklist เกิน ${WORKLIST_RETENTION_DAYS} วัน`);
           }
           fs.unlinkSync(filePath);
-          console.log(`[DICOM Service] ---> ลบไฟล์ worklist : ${file}`);
+          console.log(`[DICOM Service] ---> ลบไฟล์ worklist อายุเกิน ${WORKLIST_RETENTION_DAYS} วัน: ${file}`);
 
           const xn = fileNameToXn[file];
           if (xn && worklistState[xn] !== undefined) {

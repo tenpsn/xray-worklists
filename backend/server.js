@@ -68,7 +68,7 @@ function managehl7Service(settings) {
 
   if (ishl7Enabled) {
     const hl7Port = settings.mwl.hl7Port;
-    hl7Service.starthl7Server(hl7Port, () => currentSettings.mwl.lang);
+    hl7Service.starthl7Server(hl7Port, () => settings.mwl.lang);
     console.log('[Server] ---> เปิดใช้งาน HL7 ปิดการดึงข้อมูลจาก DB');
   } else {
     hl7Service.stophl7Server();
@@ -95,7 +95,7 @@ async function applySettings(settings, options = {}) {
 
   // 3. MPPS server
   try {
-    Mppsservice.startMppsServer(settings.mwl.mppsPort || 7001, handleMppsStatusChange);
+    await Mppsservice.startMppsServer(settings.mwl.mppsPort || 7001, handleMppsStatusChange);
   } catch (err) {
     if (exitOnMppsFailure) {
       console.error('[Server] ---> เริ่ม MPPS server ไม่สำเร็จตอนสตาร์ท ปิดโปรแกรม:', err.message);
@@ -432,7 +432,7 @@ app.post('/api/settings', async (req, res) => {
         success: true,
         settings: maskSecrets(currentSettings),
         worklistDirActive: dicomService.getWorklistDir(),
-        message: `บันทึกการตั้งค่าเรียบร้อย กรอกข้อมูลฐานข้อมูลไม่ครบ ไม่ได้ทดสอบเชื่อมต่อ)${warningText}`,
+        message: `บันทึกการตั้งค่าเรียบร้อย กรอกข้อมูลฐานข้อมูลไม่ครบ ไม่ได้ทดสอบเชื่อมต่อ${warningText}`,
       });
     }
 

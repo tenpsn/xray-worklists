@@ -44,14 +44,14 @@ function cleanupOldLogs() {
       if (ageDays > LOG_RETENTION_DAYS) {
         try {
           fs.unlinkSync(path.join(LOG_DIR, file));
-          console.log(`[MPPS] ---> ลบไฟล์ log : ${file}`);
+          console.log(`[MPPS] ---> ลบไฟล์ log อายุเกิน ${LOG_RETENTION_DAYS} วัน: ${file}`);
         } catch (err) {
           // ข้ามไฟล์นี้ไป ไม่ทำให้ cleanup ไฟล์อื่นพังตาม
         }
       }
     });
   } catch (err) {
-    console.warn('[MPPS] ---> ลบไฟล์ log ไม่สำเร็จ :', err.message);
+    console.warn(`[MPPS] ---> ลบไฟล์ log อายุเกิน ${LOG_RETENTION_DAYS} วันไม่สำเร็จ:`, err.message);
   }
 }
 
@@ -257,7 +257,7 @@ function stopMppsServer() {
   }
 }
 
-// เริ่ม/รีสตาร์ท MPPS Server เพื่อรับอัปเดตสถานะการตรวจ โดยจะโยน Error ให้ผู้เรียก server.js จัดการเองหากเปิดพอร์ตไม่สำเร็จ
+// เริ่ม/รีสตาร์ท MPPS Server
 function startMppsServer(port, onStatusChange) {
   stopMppsServer();
   onStatusChangeCallback = onStatusChange;
@@ -265,17 +265,34 @@ function startMppsServer(port, onStatusChange) {
   const MppsScpClass = createMppsScpClass();
   server = new Server(MppsScpClass);
 
-  server.on('networkError', (e) => {
-    const code = e && e.code;
-    if (code === 'EADDRINUSE') {
-      console.error(`[MPPS] ---> พอร์ต ${port} ถูกใช้งานอยู่แล้ว ไม่สามารถรับ MPPS จากเครื่อง Modality ได้ กรุณาตรวจสอบว่ามีโปรแกรมอื่น หรือ backend อีก instance ใช้พอร์ตนี้อยู่ก่อนแล้วหรือไม่`);
-    } else {
-      console.warn('[MPPS] ---> Network error:', (e && e.message) || e);
-    }
-  });
+  return new Promise((resolve, reject) => {
+    let settled = false;
 
-  server.listen(Number(port));
-  console.log(`[MPPS] ---> เริ่ม MPPS SCP server ที่พอร์ต ---> ${port}`);
+    server.on('networkError', (e) => {
+      const code = e && e.code;
+      if (code === 'EADDRINUSE') {
+        console.error(`[MPPS] ---> พอร์ต ${port} ถูกใช้งานอยู่แล้ว ไม่สามารถรับ MPPS จากเครื่อง Modality ได้ กรุณาตรวจสอบว่ามีโปรแกรมอื่น หรือ backend อีก instance ใช้พอร์ตนี้อยู่ก่อนแล้วหรือไม่`);
+      } else {
+        console.warn('[MPPS] ---> Network error:', (e && e.message) || e);
+      }
+
+      if (!settled) {
+        settled = true;
+        server = null;
+        reject(e instanceof Error ? e : new Error((e && e.message) || `MPPS network error (${code || 'unknown'})`));
+      }
+    });
+
+    server.on('listening', () => {
+      if (!settled) {
+        settled = true;
+        console.log(`[MPPS] ---> เริ่ม MPPS SCP server ที่พอร์ต ---> ${port}`);
+        resolve();
+      }
+    });
+
+    server.listen(Number(port));
+  });
 }
 
 module.exports = { 
