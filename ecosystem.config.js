@@ -5,6 +5,7 @@ module.exports = {
       script: "server.js",
       cwd: "./backend", // ชี้เข้าไปในโฟลเดอร์ backend
       instances: 1,
+      exec_mode: "fork",
       autorestart: true,
       watch: false,
       max_memory_restart: "300M",
