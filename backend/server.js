@@ -69,10 +69,10 @@ function managehl7Service(settings) {
   if (ishl7Enabled) {
     const hl7Port = settings.mwl.hl7Port;
     hl7Service.starthl7Server(hl7Port, () => settings.mwl.lang);
-    console.log('[Server] ---> เปิดใช้งาน HL7 ปิดการดึงข้อมูลจาก DB');
+    console.log('[Server] ---> เปิดใช้งาน HL7');
   } else {
     hl7Service.stophl7Server();
-    console.log('[Server] ---> ปิดใช้งาน HL7 ดึงข้อมูลจาก DB');
+    console.log('[Server] ---> ปิดใช้งาน HL7');
   }
 }
 
@@ -527,7 +527,6 @@ let isAutoGenRunning = false;
 
 async function runAutoWorklistCycle() {
   if (isAutoGenRunning) return; // กันรอบซ้อน
-  if (ishl7Enabled) return; // โหมด HL7 ไม่ต้องดึงข้อมูลจาก DB
 
   // ถ้ายัังไม่ได้ตั้งค่าฐานข้อมูลให้หยุดทำงาน
   const hisConfig = currentSettings.his || {};
@@ -609,12 +608,10 @@ app.post('/api/xray-report', async (req, res) => {
 
     res.json({ success: true, count: result.rowCount, data: records });
 
-    if (records.length > 0 && !ishl7Enabled) {
+    if (records.length > 0) {
       processWorklistFiles(records, displayLang).catch((err) => {
         console.error('[Worklist] ---> เกิดข้อผิดพลาดขณะสร้างไฟล์ worklist แบบ background:', err);
       });
-    } else if (ishl7Enabled && records.length > 0) {
-      console.log('[Worklist] ---> เปิด HL7 ข้ามการสร้างไฟล์ Worklist จาก DB');
     }
 
   } catch (err) {
