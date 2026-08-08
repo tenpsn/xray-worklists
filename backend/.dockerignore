@@ -1,0 +1,8 @@
+node_modules
+dcmtk
+logs
+worklists
+.env
+settings.json
+mpps-state.json
+*.log

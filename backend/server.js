@@ -145,11 +145,11 @@ let dbReadyPromise = applySettings(currentSettings, {
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('[Server] ---> Uncaught Exception ปิดโปรแกรมเพื่อความปลอดภัย ให้ PM2 restart:', err);
+  console.error('[Server] ---> Uncaught Exception ปิดโปรแกรมเพื่อความปลอดภัย ให้ Docker restart:', err);
   process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[Server] ---> Unhandled Rejection ปิดโปรแกรมเพื่อความปลอดภัย ให้ PM2 restart:', reason);
+  console.error('[Server] ---> Unhandled Rejection ปิดโปรแกรมเพื่อความปลอดภัย ให้ Docker restart:', reason);
   process.exit(1);
 });
 process.on('SIGINT', () => {

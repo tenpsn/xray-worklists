@@ -9,7 +9,7 @@
 - ฝั่งซ้าย: ฐานข้อมูลของโรงพยาบาล HIS ที่มีรายชื่อคนไข้ที่ถูกส่งมาตรวจ X-ray
 - ฝั่งขวา: เครื่อง X-ray ที่ต้องรู้ว่าวันนี้มีใครมาตรวจบ้าง
 
-แทนที่เจ้าหน้าที่ต้องพิมพ์ชื่อ-นามสกุลคนไข้ที่หน้าเครื่องเองทุกครั้ง (เสี่ยงพิมพ์ผิด เสียเวลา) ระบบนี้จะดึงข้อมูลจาก HIS มาส่งให้เครื่องอัตโนมัติ
+แทนที่เจ้าหน้าที่ต้องพิมพ์ชื่อ-นามสกุลคนไข้ที่หน้าเครื่องเองทุกครั้ง ระบบนี้จะดึงข้อมูลจาก HIS มาส่งให้เครื่องอัตโนมัติ
 
 **สิ่งที่เว็บทำได้:**
 
@@ -33,7 +33,7 @@
 1. เครื่องคอมพิวเตอร์ที่เป็น **Windows** และลง **Node.js** ไว้แล้ว (เวอร์ชัน 18 ขึ้นไป) — ถ้ายังไม่มีดาวน์โหลดได้จาก nodejs.org
 2. รู้ข้อมูลเชื่อมต่อฐานข้อมูล HIS ของโรงพยาบาล ได้แก่ IP, Port, ชื่อฐานข้อมูล, Username, Password
 3. ไฟล์ `dump2dcm.exe` (มากับโปรแกรม DCMTK) — เป็นตัวช่วยแปลงข้อมูลให้เป็นไฟล์ที่เครื่อง X-ray อ่านได้ **ไฟล์นี้ติดมากับโปรเจกต์อยู่แล้ว** ที่ `backend\dcmtk\bin\dump2dcm.exe` เว้นแต่ไฟล์นี้หายค่อยไปโหลดจาก dcmtk.org มาแทน
-4. โปรแกรม **PM2** (ใช้ตอนขึ้นใช้งานจริง ให้ระบบรันค้างอยู่เบื้องหลังตลอด ไม่ต้องเปิดหน้าต่างค้างไว้) — จะติดตั้งตอนไหนก็ได้ ไม่จำเป็นต้องมีตั้งแต่ทดสอบครั้งแรก
+4. โปรแกรม **Docker Desktop** (ใช้ตอนขึ้นใช้งานจริง ให้ระบบรันเป็น container อยู่เบื้องหลังตลอด ไม่ต้องเปิดหน้าต่างค้างไว้) — ดาวน์โหลดได้จาก [docker.com](https://www.docker.com/products/docker-desktop/) จะติดตั้งตอนไหนก็ได้ ไม่จำเป็นต้องมีตั้งแต่ทดสอบครั้งแรก
 
 ---
 
@@ -43,14 +43,13 @@
 
 ### ขั้นที่ 1 — วางไฟล์โปรเจกต์ให้ครบ
 
-วางโฟลเดอร์ทั้งหมดไว้ที่ `D:\xray-worklists` (ถ้าจะวางที่อื่น ต้องไปแก้ path ในไฟล์ `start-system.bat` ให้ตรงด้วย) โครงสร้างควรมีหน้าตาแบบนี้:
+วางโฟลเดอร์ทั้งหมดไว้ที่ `D:\xray-worklists` (ถ้าจะวางที่อื่น ก็ใช้งานได้เหมือนกัน) โครงสร้างควรมีหน้าตาแบบนี้:
 
 ```
 xray-worklists/
 ├── backend/
 ├── frontend/
-├── ecosystem.config.js
-└── start-system.bat
+└── docker-compose.yml
 ```
 
 ### ขั้นที่ 2 — เช็คไฟล์ dump2dcm.exe
@@ -143,58 +142,78 @@ npm run dev
 
 ## 4. ใช้งานจริง — ให้ระบบรันค้างตลอดเวลา
 
-ตอนทดสอบเราใช้ `npm run dev` ซึ่งพอปิดหน้าต่าง Terminal ระบบก็จะหยุดทำงาน วิธีที่ถูกต้องสำหรับใช้งานจริงคือให้ **PM2** ช่วยรันระบบอยู่เบื้องหลังตลอดเวลา
+ตอนทดสอบเราใช้ `npm run dev` ซึ่งพอปิดหน้าต่าง Terminal ระบบก็จะหยุดทำงาน วิธีที่ถูกต้องสำหรับใช้งานจริงคือให้ **Docker** รันทั้ง backend และ frontend เป็น container อยู่เบื้องหลังตลอดเวลา
+
+ที่ root ของโปรเจกต์มีไฟล์ **`docker-compose.yml`** เตรียมไว้ให้แล้ว ก่อนรันครั้งแรกให้เช็คว่า `backend/.env` มีอยู่จริง (ทำตามขั้นที่ 3 มาแล้วจะมีอยู่แล้ว) เพราะ Docker จะอ่านค่าจากไฟล์นี้
 
 ```bash
-# สร้างไฟล์เว็บเวอร์ชันใช้งานจริงก่อน (ทำครั้งแรก และทุกครั้งที่มีการแก้โค้ด)
-cd frontend
-npm run build
-cd ..
+# build image ของทั้ง backend และ frontend (ทำครั้งแรก และทุกครั้งที่มีการแก้โค้ด)
+docker compose build
 
-# ติดตั้ง pm2 (ทำครั้งเดียว ถ้ายังไม่เคยติดตั้ง)
-npm install pm2
-
-# สั่งรันทั้ง backend และ frontend พร้อมกัน
-npx pm2 start ecosystem.config.js
+# สั่งรันทั้ง backend และ frontend พร้อมกัน อยู่เบื้องหลัง (-d)
+docker compose up -d
 ```
 
 เช็คว่าระบบรันอยู่ไหม:
 
 ```bash
-npx pm2 status
+docker compose ps
 ```
 
 ถ้าอยากดู log ว่าเกิดอะไรขึ้นบ้าง:
 
 ```bash
-npx pm2 logs xray-backend
-npx pm2 logs xray-frontend
+docker compose logs -f backend
+docker compose logs -f frontend
 ```
 
-### ให้ระบบรันเองอัตโนมัติด้วย start-system.bat
+สั่ง restart ตัวใดตัวหนึ่ง (เช่น backend ค้าง หรือแก้ `.env` แล้วอยากให้มีผล):
 
-แทนที่จะพิมพ์คำสั่งข้างบนทุกครั้ง มีไฟล์ **`start-system.bat`** เตรียมไว้ให้แล้วที่ทำงานเดียวกัน (สั่ง `pm2 start ecosystem.config.js` ให้อัตโนมัติ)
+```bash
+docker compose restart backend
+```
 
-**ต้องวางไว้ตรงไหน:** ไฟล์นี้ต้องอยู่ที่ root ของโปรเจกต์ (ที่เดียวกับ `ecosystem.config.js`) คือ `D:\xray-worklists\start-system.bat` — ถ้าทำตามขั้นที่ 1 มาปกติ ไฟล์นี้จะอยู่ตรงนั้นอยู่แล้ว ไม่ต้องย้ายไปไหน (ถ้าวางโปรเจกต์ไว้ที่อื่นไม่ใช่ `D:\xray-worklists` ต้องเปิดไฟล์นี้ด้วย Notepad แล้วแก้บรรทัด `cd /d "D:\xray-worklists"` ให้ตรงกับตำแหน่งจริงก่อน)
+หยุดทั้งระบบ:
 
-**วิธีใช้ครั้งแรก (รันด้วยมือ):** ดับเบิลคลิกไฟล์ `start-system.bat` ได้เลย จะมีหน้าต่างดำๆ (cmd) เด้งขึ้นมาแป๊บหนึ่งแล้วปิดไปเอง — ปิดไปได้เลยไม่มีผลอะไร เพราะ pm2 จะรันระบบอยู่เบื้องหลังต่อ (เช็คด้วย `npx pm2 status` ได้ว่ารันอยู่จริง)
+```bash
+docker compose down
+```
 
-**วิธีตั้งให้รันอัตโนมัติทุกครั้งที่เปิดเครื่อง Windows (ผ่าน Task Scheduler):**
+### คำสั่ง Docker ที่ใช้บ่อย
 
-1. กด Start แล้วพิมพ์ค้นหา "Task Scheduler" เปิดขึ้นมา
-2. คลิกขวาที่ "Task Scheduler Library" (หรือมุมขวา) เลือก **Create Task...**
-3. แท็บ **General**: ตั้งชื่องาน เช่น `Start Xray Worklists`
-4. แท็บ **Triggers**: กด New... เลือก Begin the task เป็น **At startup** (รันตอนเปิดเครื่อง)
-5. แท็บ **Actions**: กด New... เลือก Action เป็น **Start a program** แล้วกด Browse ไปเลือกไฟล์ `D:\xray-worklists\start-system.bat`
-6. กด OK จนครบทุกแท็บ
+**หยุดชั่วคราวโดยไม่ลบ container** (เปิดกลับมาเร็วกว่า `up -d` เพราะไม่ต้องสร้าง container ใหม่):
 
-**อีกวิธี (ง่ายกว่า) — วาง shortcut ไว้ในโฟลเดอร์ Startup:**
+```bash
+docker compose stop
+```
+```bash
+docker compose start
+```
 
-1. กด `Win + R` พิมพ์ `shell:startup` แล้ว Enter (จะเปิดโฟลเดอร์ Startup ของ user ที่ login อยู่)
-2. คลิกขวาไฟล์ `D:\xray-worklists\start-system.bat` เลือก **Show more options > Send to > Desktop (create shortcut)** จะได้ shortcut ของไฟล์นี้บน Desktop
-3. ลาก shortcut ที่ได้ไปวางในโฟลเดอร์ Startup ที่เปิดไว้ในขั้นที่ 1
+**เข้าไปเช็คข้างในตัว container (debug):**
 
-**ต่างกับ Task Scheduler ยังไง:** วิธีนี้จะรันก็ต่อเมื่อมีคน **login** เข้า Windows แล้วเท่านั้น (ถ้าตั้ง auto-login ไว้ หรือมีคน login เข้าประจำทุกครั้งที่เปิดเครื่อง ใช้วิธีนี้ได้เลย ตั้งง่ายกว่า) ส่วน Task Scheduler ตั้งเป็น "Run whether user is logged on or not" ได้ ทำให้รันตอนบูตเครื่องได้เลยแม้ไม่มีใคร login เข้าเครื่องเลย — เหมาะกว่าถ้าเครื่องนี้ไฟดับแล้วรีสตาร์ทเองบ่อยๆ โดยไม่มีคนอยู่หน้าเครื่องคอยกด login
+```bash
+docker compose exec backend sh
+```
+
+พิมพ์ `exit` เพื่อออกจากข้างใน container
+
+**ลบทิ้งหมดรวม image ด้วย (เริ่มใหม่จริงจัง เช่นตอน dcmtk/Next.js มีปัญหาแปลกๆ):**
+
+```bash
+docker compose down --rmi all
+```
+
+หลังลบแล้วต้อง `docker compose build` แล้ว `docker compose up -d` ใหม่อีกครั้ง
+
+**สรุปที่ใช้บ่อยที่สุด:** ปกติเปิดเครื่องมาไม่ต้องทำอะไรเลย (container จะกลับมาเองผ่าน `restart: unless-stopped` + Docker Desktop auto-start) อยากเช็คว่ารันอยู่ไหมใช้ `docker compose ps`, ถ้า backend มีปัญหาใช้ `docker compose restart backend`
+
+### ให้ระบบรันเองอัตโนมัติทุกครั้งที่เปิดเครื่อง Windows
+
+1. `docker-compose.yml` ตั้ง `restart: unless-stopped` ไว้ให้ทั้งสอง service อยู่แล้ว — แปลว่าตราบใดที่ Docker ยังรันอยู่ container จะถูกสั่งให้กลับมาทำงานเองเสมอ (ทั้งกรณี crash และกรณีเครื่อง restart)
+2. เปิด **Docker Desktop > Settings > General** แล้วติ๊ก **"Start Docker Desktop when you sign in"** เพื่อให้ Docker เปิดเองตอนเข้า Windows — พอ Docker เปิด container ที่เคยรันไว้ (`docker compose up -d` ไปแล้ว) จะเปิดตามให้เองอัตโนมัติ
+
+เช็คว่าตั้งไว้ถูกต้องได้ด้วยการ restart เครื่อง Windows แล้วรอสักพักลองเข้า `http://localhost:3000` ดู
 
 ---
 
@@ -204,7 +223,7 @@ npx pm2 logs xray-frontend
 เช็คหน้า "ตั้งค่าระบบ" ว่ากรอกข้อมูลฐานข้อมูล HIS ถูกไหม (IP, Password) แล้วลองเข้า `http://localhost:4000/health` ดู — ถ้าเห็น `"ok":true,"db":"connected"` แปลว่าต่อ DB ได้แล้ว ถ้ายังเห็น `"db":"disconnected"` แปลว่า IP/Password/Port ที่กรอกไว้ยังไม่ถูก ให้กลับไปแก้ในหน้า Settings อีกที
 
 **เครื่อง X-ray ไม่เห็นรายชื่อคนไข้?**
-เช็คว่าไฟล์ `dump2dcm.exe` มีอยู่จริงตาม path ที่กำหนด และเช็คว่า Orthanc ตั้งค่าโฟลเดอร์ `Worklists.Database` ตรงกับโฟลเดอร์ที่ backend ใช้จริงหรือไม่ (ดูขั้นที่ 7)
+เช็คว่า Orthanc ตั้งค่าโฟลเดอร์ `Worklists.Database` ตรงกับโฟลเดอร์ที่ backend ใช้จริงหรือไม่ (ดูขั้นที่ 7) ถ้ารันผ่าน Docker ให้เช็คว่า `dump2dcm` มีอยู่ในตัว container ด้วยคำสั่ง `docker compose exec backend which dump2dcm` (ถ้าไม่รันผ่าน Docker ให้เช็คไฟล์ `dump2dcm.exe` ตาม path ที่กำหนดแทน)
 
 **ต้องไปยืนยันผล X-ray ที่เว็บนี้ไหม?**
 ไม่ต้อง ระบบนี้แค่โชว์ตารางให้ดู การยืนยันผลยังทำผ่านระบบ HIS ตามเดิม
@@ -256,9 +275,10 @@ npx pm2 logs xray-frontend
 
 ### ความทนทานต่อ error (Reliability)
 
-- **`max_memory_restart`** ใน `ecosystem.config.js` — ถ้า backend กินแรมเกิน 300M หรือ frontend เกิน 400M PM2 จะสั่ง restart process นั้นให้อัตโนมัติ
-- **Uncaught exception / unhandled rejection** — ถ้าเกิด error ที่ไม่ได้ดักไว้ ระบบจะ log แล้วปิดโปรแกรมทันที (`process.exit(1)`) แทนที่จะทำงานต่อในสภาพ state เพี้ยน แล้วปล่อยให้ PM2 (`autorestart: true`) เริ่ม process ใหม่แบบสะอาด
+- **`mem_limit`** ใน `docker-compose.yml` — ถ้า backend กินแรมเกิน 300m หรือ frontend เกิน 400m Docker จะ OOM-kill container นั้น แล้ว `restart: unless-stopped` จะสั่งให้กลับมารันใหม่ให้อัตโนมัติ (เทียบเท่า `max_memory_restart` ของ PM2 เดิม)
+- **Uncaught exception / unhandled rejection** — ถ้าเกิด error ที่ไม่ได้ดักไว้ ระบบจะ log แล้วปิดโปรแกรมทันที (`process.exit(1)`) แทนที่จะทำงานต่อในสภาพ state เพี้ยน แล้วปล่อยให้ `restart: unless-stopped` ของ Docker สั่ง container เริ่มใหม่แบบสะอาด
 - **Port ชนกัน** — ถ้า backend เปิดไม่สำเร็จเพราะมีโปรแกรมอื่นใช้ port นั้นอยู่แล้ว ระบบจะปิดโปรแกรมทันทีพร้อม log ชัดเจน ส่วน MPPS server ถ้าเปิดไม่สำเร็จตอนสตาร์ทเครื่องถือว่าร้ายแรงและปิดโปรแกรมเช่นกัน แต่ถ้าเปลี่ยน MPPS port จากหน้าเว็บ Settings แล้วเปิดไม่สำเร็จ จะแค่แจ้งเตือน ไม่ปิดทั้งระบบ
+- **เปลี่ยน port ผ่านหน้า Settings (MPPS/HL7) ตอนรันด้วย Docker** — Docker publish port แบบตายตัวตอน container start เท่านั้น ถ้าเปลี่ยน `mppsPort` หรือเปิด HL7 พร้อมตั้ง `hl7Port` ใหม่ผ่านหน้าเว็บ ต้องไปแก้ `ports:` ใน `docker-compose.yml` ให้ตรงกับพอร์ตใหม่ด้วย แล้ว `docker compose up -d` ใหม่ ไม่งั้นเครื่อง Modality/ระบบ HIS อื่นจะเชื่อมเข้ามาไม่ได้ (ปัจจุบัน HL7 ปิดอยู่ จึงยังไม่มี HL7 port ใน `docker-compose.yml`)
 - **`GET /health`** ทดสอบเชื่อมต่อฐานข้อมูลจริงด้วย (`SELECT 1`) ไม่ใช่แค่เช็คว่า process ยังไม่ตาย — ถ้าต่อ DB ไม่ได้จะตอบ HTTP `503` เหมาะสำหรับให้เครื่องมือ monitor ภายนอกเรียกเช็คเป็นระยะ
 
 ### หมายเหตุอื่นๆ

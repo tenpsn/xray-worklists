@@ -319,7 +319,10 @@ async function generateWorklistFile(item) {
       fs.writeFileSync(dumpFilePath, dumpContent, 'utf8');
 
       // 2. ใช้คำสั่ง dump2dcm เพื่อแปลง .dump เป็น .wl
-      const dcmtkPath = path.join(__dirname, 'dcmtk', 'bin', 'dump2dcm.exe');
+      // Windows: ใช้ dump2dcm.exe ที่แถมมากับโปรเจกต์ / Linux (Docker): ใช้ dcmtk ที่ลงผ่าน apt แทน
+      const dcmtkPath = process.platform === 'win32'
+        ? path.join(__dirname, 'dcmtk', 'bin', 'dump2dcm.exe')
+        : 'dump2dcm';
       execFile(dcmtkPath, [dumpFilePath, wlFilePath], (error, stdout, stderr) => {
         try {
           if (error) {
