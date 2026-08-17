@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
   mwl: {
     usehl7: process.env.USE_hl7 === 'true' || false,
     hl7Port:process.env.hl7_PORT || '',
-    lang: process.env.MWL_LANG === 'en' ? 'en' : 'th',
+    lang: process.env.MWL_LANG === 'th' ? 'th' : 'en',
     aet: process.env.MWL_AET || '',
     port: process.env.MWL_PORT || '',
     mppsPort: process.env.MPPS_PORT || '', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality

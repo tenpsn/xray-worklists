@@ -1,7 +1,8 @@
 const net = require('net');
 const dicomService = require('./dicomService');
+const xrayQueueDb = require('./xrayQueueDb');
 
-let getDisplayLang = () => 'th';
+let getDisplayLang = () => 'en';
 
 // ตัวอักษรพิเศษสำหรับ MLLP Protocol (มาตรฐานการส่ง hl7 ผ่าน TCP)
 const VT = String.fromCharCode(0x0b); // Start block
@@ -102,6 +103,37 @@ function parsehl7ToWorklistItem(hl7Data) {
 }
 
 let server = null;
+let workerTimer = null;
+
+// ดึงงานค้าง (receive = 'N') จากคิว มาสร้างไฟล์ worklist ทีละรายการ
+async function processPendingRequests() {
+  const pending = xrayQueueDb.getPendingRequests();
+  for (const row of pending) {
+    try {
+      const worklistItem = parsehl7ToWorklistItem(row.xray_request_data);
+      await dicomService.generateWorklistFile(worklistItem);
+      xrayQueueDb.markReceived(row.xray_request_id);
+      console.log(`[HL7 Service] ---> สร้างไฟล์ Worklist จากคิวสำเร็จ XN: ${worklistItem.xn}`);
+    } catch (error) {
+      // ปล่อย receive ไว้เป็น 'N' รอ worker รอบถัดไปมาลองใหม่
+      console.error(`[HL7 Service] ---> ประมวลผลคิว id ${row.xray_request_id} ไม่สำเร็จ:`, error.message);
+    }
+  }
+}
+
+function startWorklistWorker(intervalMs = 2000) {
+  if (workerTimer) return;
+  workerTimer = setInterval(() => {
+    processPendingRequests().catch((err) => console.error('[HL7 Service] ---> Worker Error:', err.message));
+  }, intervalMs);
+}
+
+function stopWorklistWorker() {
+  if (workerTimer) {
+    clearInterval(workerTimer);
+    workerTimer = null;
+  }
+}
 
 function starthl7Server(port = 2575, getLang) {
   if (server) {
@@ -112,16 +144,18 @@ function starthl7Server(port = 2575, getLang) {
     getDisplayLang = getLang;
   }
 
-  // ประมวลผลข้อความ hl7 1 ก้อน (ไม่รวม VT/FS/CR ที่ครอบอยู่) แล้วตอบ ACK/NAK กลับไปที่ socket
+  // รับข้อความ hl7 1 ก้อน (ไม่รวม VT/FS/CR ที่ครอบอยู่) แล้วตอบ ACK/NAK กลับไปที่ socket
+  // ตัวจริง (สร้างไฟล์ worklist) แยกไปทำใน worker เพื่อให้ตอบ HIS ได้เร็ว ไม่ต้องรอ dcmtk
   async function handlehl7Message(hl7Message, socket) {
     const mshSegment = hl7Message.split('\r')[0];
+    const msgType = (mshSegment.split('|')[8] || '');
     try {
-      // 1. แปลงข้อความ
+      // 1. ตรวจโครงสร้างข้อความก่อน (ต้องมี PID + ORC/OBR) เพื่อ reject ข้อความที่ parse ไม่ได้ตั้งแต่ตรงนี้
       const worklistItem = parsehl7ToWorklistItem(hl7Message);
 
-      // 2. ส่งไปสร้างไฟล์ DICOM Worklist
-      await dicomService.generateWorklistFile(worklistItem);
-      console.log(`[HL7 Service] ---> รับ Order อัตโนมัติและสร้างไฟล์ Worklist สำเร็จ XN: ${worklistItem.xn}`);
+      // 2. บันทึกข้อความดิบลงคิว (xray_request, receive='N') รอ worker มาสร้างไฟล์ worklist ต่อ
+      xrayQueueDb.insertRequest(worklistItem.xn, msgType, hl7Message);
+      console.log(`[HL7 Service] ---> รับ Order เข้าคิวสำเร็จ XN: ${worklistItem.xn}`);
 
       // 3. ตอบกลับ HIS ว่ารับสำเร็จ (ACK)
       const ackMsg = generateACK(mshSegment, 'AA', 'Success');
@@ -173,9 +207,12 @@ function starthl7Server(port = 2575, getLang) {
   server.listen(port, () => {
     console.log(`[HL7 Service] ---> เริ่ม MLLP Listener รอรับข้อมูล HL7 ที่พอร์ต ---> ${port}`);
   });
+
+  startWorklistWorker();
 }
 
 function stophl7Server() {
+  stopWorklistWorker();
   if (server) {
     server.close();
     console.log('[HL7 Service] ---> ปิดการเชื่อมต่อ HL7');

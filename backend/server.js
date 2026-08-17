@@ -590,7 +590,7 @@ app.post('/api/xray-report', async (req, res) => {
   try {
     const { dateback = 1, include, exclude, confirm, lang, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
     const confirmFlag = confirm === true || confirm === 'true' || confirm === '1';
-    const displayLang = lang === 'en' ? 'en' : 'th';
+    const displayLang = lang === 'th' ? 'th' : 'en';
 
     const { sql, params } = buildXrayReportQuery(
       dateback, include, exclude, confirmFlag,

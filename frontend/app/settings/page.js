@@ -322,7 +322,7 @@ export default function SettingsPage() {
               <label>
                 HL7 Language
                 <select
-                  value={form.mwl.lang === 'en' ? 'en' : 'th'}
+                  value={form.mwl.lang === 'th' ? 'th' : 'en'}
                   onChange={(e) => updateMwl('lang', e.target.value)}
                 >
                   <option value="th">TH</option>

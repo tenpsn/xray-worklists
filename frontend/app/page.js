@@ -12,7 +12,7 @@ export default function Page() {
   const [confirm, setConfirm] = useState(false);
   const [rows, setRows] = useState([]);
   const [status, setStatus] = useState('กำลังโหลดข้อมูล...');
-  const [lang, setLang] = useState('th');
+  const [lang, setLang] = useState('en');
 
   // เพิ่ม Ref สำหรับเก็บ "ค่าที่ใช้ค้นหาจริง" ล่าสุดจากการกดปุ่มค้นหา[cite: 9]
   const appliedFilters = useRef({
