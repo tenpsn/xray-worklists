@@ -14,7 +14,7 @@ export default function Page() {
   const [status, setStatus] = useState('กำลังโหลดข้อมูล...');
   const [lang, setLang] = useState('en');
 
-  // เพิ่ม Ref สำหรับเก็บ "ค่าที่ใช้ค้นหาจริง" ล่าสุดจากการกดปุ่มค้นหา[cite: 9]
+  // เก็บค่าที่ใช้ค้นหาจริงล่าสุด (ตอนกดปุ่มค้นหา)
   const appliedFilters = useRef({
     dateback: 1,
     include: '',
@@ -45,7 +45,7 @@ export default function Page() {
         loadedXNsMap.current.clear();
         setStatus('กำลังโหลดข้อมูล...');
         
-        // อัปเดต "ค่าที่ใช้ค้นหาจริง" เมื่อผู้ใช้กดปุ่มค้นหาแบบ Manual[cite: 9]
+        // อัปเดตค่าที่ใช้ค้นหาจริง เฉพาะตอนกดค้นหาเอง
         appliedFilters.current = { dateback, include, exclude, confirm };
       }
 
@@ -65,7 +65,7 @@ export default function Page() {
         else if (c === 'N' && crf === 'Y') xns_NY.push(xn);
       });
 
-      // ใช้ค่าจาก appliedFilters.current แทน State ของ Input ที่อาจจะกำลังพิมพ์อยู่[cite: 9]
+      // ใช้ค่าจาก appliedFilters.current แทน state ของ input ที่อาจกำลังพิมพ์ค้างอยู่
       const requestBody = {
         dateback: appliedFilters.current.dateback || 1,
         include: appliedFilters.current.include,
@@ -118,7 +118,6 @@ export default function Page() {
         loadedXNsMap.current.set(row.xn, currentStatus);
       }
 
-      // นำข้อมูลลง State
       if (newRows.length > 0 || updatedRowsMap.size > 0) {
         setRows((prev) => {
           // 1. อัปเดตข้อมูลเก่าก่อน ถ้ามีตัวไหนตรงกับ updatedRowsMap ให้ใช้ข้อมูลใหม่

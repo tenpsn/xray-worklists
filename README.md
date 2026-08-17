@@ -154,6 +154,12 @@ docker compose build
 docker compose up -d
 ```
 
+**สำคัญ — IP Address ของฐานข้อมูล HIS ในหน้า Settings เมื่อรันผ่าน Docker**: เพราะ backend รันอยู่ใน container แยกจากเครื่องจริง คำว่า `localhost`/`127.0.0.1` ในมุมมองของ container จะหมายถึงตัว container เอง ไม่ใช่เครื่อง Windows ที่รัน Docker อยู่
+
+- ถ้าฐานข้อมูล HIS อยู่**เครื่องเดียวกัน**กับที่รัน Docker (โฮสต์เดียวกัน) → ต้องใส่ `host.docker.internal` แทน `localhost`/`127.0.0.1`
+- ถ้าฐานข้อมูล HIS อยู่**คนละเครื่อง** (เซิร์ฟเวอร์แยกในวง LAN เดียวกัน) → ใส่ IP ของเครื่องนั้นตามปกติ เช่น `192.168.x.x` ได้เลย ไม่ต้องเปลี่ยนอะไร
+- (ข้อควรระวังถ้าย้ายไป deploy บน Linux server ที่ไม่ใช่ Docker Desktop) `host.docker.internal` จะใช้ไม่ได้ทันที ต้องเพิ่ม `extra_hosts: ["host.docker.internal:host-gateway"]` ให้ service `backend` ใน `docker-compose.yml` ก่อน
+
 เช็คว่าระบบรันอยู่ไหม:
 
 ```bash

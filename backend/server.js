@@ -40,16 +40,14 @@ function maskSecrets(value) {
 // อนุญาตให้ frontend (คนละ port/โดเมน) เรียกเข้ามาได้
 app.use(cors({ origin: CORS_ORIGIN }));
 
-// รับข้อมูลแบบ JSON
 app.use(express.json());
 
 // โหลดการตั้งค่า (HIS MWL)
 let currentSettings = settingsService.loadSettings();
 
-// ตัวแปรเช็คสถานะ hl7
 let ishl7Enabled = currentSettings.mwl.usehl7 === true;
 
-// เพิ่มตัวแปรสำหรับจดจำ XN ที่ถ่ายเสร็จแล้ว
+// จำ XN ที่ถ่ายเสร็จแล้ว
 const mppsCompletedXNs = new Set();
 
 // เมื่อเครื่อง Modality ส่งสถานะ MPPS กลับมา (ตรวจเสร็จ/ยกเลิก) ให้ลบไฟล์ worklist (.wl) ทิ้ง
@@ -64,10 +62,10 @@ function handleMppsStatusChange(accessionNumber, status) {
 }
 
 function managehl7Service(settings) {
-  ishl7Enabled = settings.mwl.usehl7 === true; // อัปเดตสถานะตรงนี้
+  ishl7Enabled = settings.mwl.usehl7 === true;
 
   if (ishl7Enabled) {
-    const hl7Port = settings.mwl.hl7Port;
+    const hl7Port = settings.mwl.hl7Port || 2575; // เว้นว่าง = ใช้ 2575 กัน server.listen('') พังตอน save settings
     hl7Service.starthl7Server(hl7Port, () => settings.mwl.lang);
     console.log('[Server] ---> เปิดใช้งาน HL7');
   } else {
@@ -83,7 +81,12 @@ async function applySettings(settings, options = {}) {
   let dbSkipped = false;
 
   // 1. HL7 listener เปิด/ปิดตามค่า mwl.usehl7
-  managehl7Service(settings);
+  try {
+    managehl7Service(settings);
+  } catch (err) {
+    console.error('[Settings] ---> เปิดใช้งาน HL7 ไม่สำเร็จ:', err.message);
+    warnings.push(`เปิดใช้งาน HL7 ไม่สำเร็จ - ${err.message} กรุณาตรวจสอบ HL7 Port`);
+  }
 
   // 2. โฟลเดอร์เก็บไฟล์ worklist
   try {
@@ -186,11 +189,11 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
   if (hisSystem === 'hosxp') {
     return buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType);
   }
-  return buildSoftconQuery(dateback, include, exclude, existingXNs, dbType);
+  return buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbType, xns_NN, xns_YN, xns_NY);
 }
 
 // SoftCon - schema แบบ RadRequestHeader/RadRequest/Patient/Person/Visit
-function buildSoftconQuery(dateback, include, exclude, existingXNs, dbType) {
+function buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbType, xns_NN = [], xns_YN = [], xns_NY = []) {
   const state = { params: [], paramIndex: 1 };
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 0;
 
@@ -236,8 +239,9 @@ function buildSoftconQuery(dateback, include, exclude, existingXNs, dbType) {
       ${studyDateExpr} as "StudyDate", 
       ${studyTimeExpr} as "StudyTime",
       '' as xray_items_group,
-      'N' as confirm, 
-      'N' as confirm_read_film,
+      -- SoftCon มี flag เดียว (IsDone) ไม่แยก 2 ขั้นแบบ HOSxP เลยใช้ค่าเดียวกันแทนทั้งคู่
+      CASE WHEN rrh.IsDone = 1 THEN 'Y' ELSE 'N' END as confirm,
+      CASE WHEN rrh.IsDone = 1 THEN 'Y' ELSE 'N' END as confirm_read_film,
       LTRIM(CONCAT(tdoc.ShortName, ' ', pd.FirstName, ' ', pd.LastName)) as Doctor,
       rr.ItemKey as xray_items_code, 
       '' as Modality,
@@ -253,7 +257,6 @@ function buildSoftconQuery(dateback, include, exclude, existingXNs, dbType) {
     LEFT JOIN Person pd ON doc.EmployeeKey = pd.PersonKey
     LEFT JOIN Title tdoc ON pd.TitleKey = tdoc.TitleKey
     WHERE ${dateWindow}
-      AND rrh.IsDone = 0
   `;
   state.params.push(safeDateback);
   state.paramIndex++;
@@ -264,8 +267,26 @@ function buildSoftconQuery(dateback, include, exclude, existingXNs, dbType) {
   const excludeClause = buildLikeClause(state, 'rr.ItemName', exclude, true);
   if (excludeClause) sql += ` AND ${excludeClause}`;
 
-  const notInClause = buildInClause(state, 'v.VN', existingXNs, true);
-  if (notInClause) sql += ` AND (${notInClause})`;
+  if (confirm) {
+    sql += ` AND rrh.IsDone = 0`;
+  }
+
+  if (existingXNs && existingXNs.length > 0) {
+    // เอา XN ที่มีอยู่แล้วตัดออกไปก่อนเป็นพื้นฐาน
+    let filterSql = buildInClause(state, 'v.VN', existingXNs, true);
+
+    // SoftCon มี flag เดียว (IsDone) ไม่แยก 2 ขั้น เลยใช้เงื่อนไขเดียวกันครอบคลุมทั้ง 3 กรณี NN/YN/NY
+    const nnClause = buildInClause(state, 'v.VN', xns_NN);
+    if (nnClause) filterSql += ` OR (${nnClause} AND rrh.IsDone = 1)`;
+
+    const ynClause = buildInClause(state, 'v.VN', xns_YN);
+    if (ynClause) filterSql += ` OR (${ynClause} AND rrh.IsDone = 1)`;
+
+    const nyClause = buildInClause(state, 'v.VN', xns_NY);
+    if (nyClause) filterSql += ` OR (${nyClause} AND rrh.IsDone = 1)`;
+
+    sql += ` AND (${filterSql})`;
+  }
 
   sql += ` ORDER BY rrh.Code DESC`;
   return { sql, params: state.params };
@@ -370,7 +391,8 @@ function reconcileSecrets(incoming, existing) {
     for (const [key, val] of Object.entries(incoming)) {
       const existingVal = existing ? existing[key] : undefined;
       if (SECRET_FIELD_REGEX.test(key)) {
-        result[key] = (val === '' || val === '••••••••' || val === undefined) ? existingVal : val;
+        // '' = ตั้งใจลบค่าจริง ต่างจาก placeholder ('••••••••'/undefined) ที่ให้คงค่าเดิม
+        result[key] = (val === '••••••••' || val === undefined) ? existingVal : val;
       } else {
         result[key] = reconcileSecrets(val, existingVal);
       }
@@ -463,7 +485,7 @@ let isProcessingXrayReport = false;
 
 let isGeneratingWorklists = false;
 
-// จำนวนไฟล์ worklist ที่ยอมให้สร้าง/แปลง พร้อมกัน ปรับตัวเลขนี้ได้ตามสเปคเครื่อง เพิ่มเป็น 10-15 ก็ได้เพื่อให้เร็วขึ้น
+// จำนวนไฟล์สร้างพร้อมกัน ปรับเพิ่มได้ถ้าเครื่องแรงพอ
 const WORKLIST_CONCURRENCY = 5;
 
 async function processWorklistFiles(records, displayLang) {
@@ -492,10 +514,9 @@ async function processWorklistFiles(records, displayLang) {
         try {
           record.lang = displayLang;
 
-          // แปลง / เป็น - เพื่อเช็คความจำให้ตรงกับฝั่ง MPPS ที่ตอบกลับมา
-          const safeXn = String(record.xn).replace(/[\\/:]/g, '-');
+          // ใช้ sanitizer เดียวกับที่ dicomService สร้างชื่อไฟล์จริง ให้ตรงกับ MPPS ที่ตอบกลับมา
+          const safeXn = dicomService.sanitizeFileName(record.xn);
 
-          // ถ้าสถานะเป็น Y, Y ให้ลบไฟล์ทิ้ง
           if (record.confirm === 'Y' && record.confirm_read_film === 'Y') {
             dicomService.deleteWorklistFile(record.xn);
 
@@ -528,7 +549,7 @@ let isAutoGenRunning = false;
 async function runAutoWorklistCycle() {
   if (isAutoGenRunning) return; // กันรอบซ้อน
 
-  // ถ้ายัังไม่ได้ตั้งค่าฐานข้อมูลให้หยุดทำงาน
+  // ถ้ายังไม่ได้ตั้งค่าฐานข้อมูลให้หยุดทำงาน
   const hisConfig = currentSettings.his || {};
   if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
     return;
@@ -742,6 +763,5 @@ dbReadyPromise.finally(() => {
     process.exit(1);
   });
 
-  // เริ่มสร้างไฟล์ .wl อัตโนมัติ
   startAutoWorklistLoop();
 });

@@ -104,20 +104,31 @@ function parsehl7ToWorklistItem(hl7Data) {
 
 let server = null;
 let workerTimer = null;
+let isProcessingQueue = false; // กันรอบซ้อน เผื่อรอบก่อนยังไม่เสร็จ (dump2dcm ช้า)
 
 // ดึงงานค้าง (receive = 'N') จากคิว มาสร้างไฟล์ worklist ทีละรายการ
 async function processPendingRequests() {
-  const pending = xrayQueueDb.getPendingRequests();
-  for (const row of pending) {
-    try {
-      const worklistItem = parsehl7ToWorklistItem(row.xray_request_data);
-      await dicomService.generateWorklistFile(worklistItem);
-      xrayQueueDb.markReceived(row.xray_request_id);
-      console.log(`[HL7 Service] ---> สร้างไฟล์ Worklist จากคิวสำเร็จ XN: ${worklistItem.xn}`);
-    } catch (error) {
-      // ปล่อย receive ไว้เป็น 'N' รอ worker รอบถัดไปมาลองใหม่
-      console.error(`[HL7 Service] ---> ประมวลผลคิว id ${row.xray_request_id} ไม่สำเร็จ:`, error.message);
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+  try {
+    const pending = xrayQueueDb.getPendingRequests();
+    for (const row of pending) {
+      try {
+        const worklistItem = parsehl7ToWorklistItem(row.xray_request_data);
+        // ใช้ xn ที่บันทึกไว้ตอนรับเข้าคิว ไม่ใช้ที่ parse ใหม่ตรงนี้ เพราะ fallback `XN${Date.now()}` จะได้คนละค่ากับตอนรับถ้าไม่มี OBR-3/ORC-2
+        if (row.xray_request_xn) {
+          worklistItem.xn = row.xray_request_xn;
+        }
+        await dicomService.generateWorklistFile(worklistItem);
+        xrayQueueDb.markReceived(row.xray_request_id);
+        console.log(`[HL7 Service] ---> สร้างไฟล์ Worklist จากคิวสำเร็จ XN: ${worklistItem.xn}`);
+      } catch (error) {
+        // ปล่อย receive ไว้เป็น 'N' รอ worker รอบถัดไปมาลองใหม่
+        console.error(`[HL7 Service] ---> ประมวลผลคิว id ${row.xray_request_id} ไม่สำเร็จ:`, error.message);
+      }
     }
+  } finally {
+    isProcessingQueue = false;
   }
 }
 

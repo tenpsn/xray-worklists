@@ -144,15 +144,24 @@ function computeItemHash(item) {
     Modality: item.Modality,
     Doctor: item.Doctor,
     xraylist: item.xraylist,
+    xray_items_code: item.xray_items_code,
     lang: item.lang === 'en' ? 'en' : 'th',
   };
   return crypto.createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
 }
 
-// แปลงวันที่จาก DB ให้เป็น Format DICOM (YYYYMMDD)
+// แปลงวันที่เป็น DICOM YYYYMMDD รับได้ทั้ง Date/ISO string จาก DB และสตริงดิบจาก HL7 (PID-7)
+// new Date() พังกับสตริงไม่มีตัวคั่นแบบ '19900101' เลยดึงตัวเลขตรงๆ ก่อน
 function formatDicomDate(dateStr) {
   if (!dateStr) return '';
+
+  if (typeof dateStr === 'string') {
+    const digits = dateStr.replace(/[^0-9]/g, '');
+    if (digits.length >= 8) return digits.substring(0, 8);
+  }
+
   const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
   const year = d.getFullYear();
   const month = ('0' + (d.getMonth() + 1)).slice(-2);
   const day = ('0' + d.getDate()).slice(-2);
@@ -260,7 +269,12 @@ async function generateWorklistFile(item) {
       const procedureCode = item.xray_items_code || '';
 
       // StudyInstanceUID ต้องคงที่ตลอดอายุของรายการนี้ ไม่สุ่มใหม่ทุกครั้งที่อัพเดทไฟล์
+      // เก็บลง state ทันที ไม่รอผล dump2dcm เผื่อรอบนี้ล้มเหลว รอบหน้าจะได้ใช้ตัวเดิมซ้ำ
       const studyInstanceUID = getOrCreateStudyInstanceUID(accessionNumber);
+      if (!worklistState[accessionNumber] || worklistState[accessionNumber].studyInstanceUID !== studyInstanceUID) {
+        worklistState[accessionNumber] = { ...(worklistState[accessionNumber] || {}), studyInstanceUID };
+        saveState();
+      }
 
       // ใช้ safeFileName เพื่อระบุชื่อไฟล์ในการตรวจสอบและสร้างไฟล์
       const wlFileNameCheck = `${safeFileName}.wl`;
@@ -326,17 +340,16 @@ async function generateWorklistFile(item) {
       execFile(dcmtkPath, [dumpFilePath, wlFilePath], (error, stdout, stderr) => {
         try {
           if (error) {
-            console.warn(`[DICOM Service] ---> Warning: ไม่สามารถแปลงไฟล์ .wl ได้: ${error.message}`);
-            // แปลงไม่สำเร็จ ไม่ถือว่าอัพเดทสมบูรณ์ -> ไม่บันทึก hash ไว้ เพื่อให้รอบถัดไปลองใหม่อีกครั้ง
-            return resolve({ success: true, file: dumpFilePath, message: 'Created .dump only' });
+            console.error(`[DICOM Service] ---> ไม่สามารถแปลงไฟล์ .wl ได้ (ยังไม่มีไฟล์ worklist ให้เครื่อง Modality): ${error.message}`);
+            // ต้อง reject ให้ผู้เรียกรู้ว่ายังไม่เสร็จจริง ไม่งั้นจะถูกนับว่าสำเร็จทั้งที่ไม่มีไฟล์ .wl
+            return reject(new Error(`แปลงไฟล์ .wl ไม่สำเร็จ: ${error.message}`));
           }
 
           // ลบไฟล์ .dump ทิ้งเมื่อสร้าง .wl สำเร็จ
           safeDeleteDumpFile(dumpFilePath);
 
-          // บันทึก hash + StudyInstanceUID ของข้อมูลชุดนี้ไว้ ครั้งหน้าถ้าข้อมูลไม่เปลี่ยนจะได้ข้าม
-          // และใช้ StudyInstanceUID เดิมซ้ำ ไม่สุ่มใหม่ทุกครั้ง
-          worklistState[accessionNumber] = { hash: currentHash, studyInstanceUID };
+          // บันทึก hash ไว้เทียบรอบหน้า (StudyInstanceUID เก็บไปแล้วตั้งแต่ก่อนเรียก dump2dcm ด้านบน)
+          worklistState[accessionNumber] = { ...worklistState[accessionNumber], hash: currentHash, studyInstanceUID };
           saveState();
 
           console.log(`[DICOM Service] ---> สร้าง/อัพเดทไฟล์ Worklist สำเร็จ: ${wlFilePath}`);
@@ -393,5 +406,6 @@ module.exports = {
   deleteWorklistFile,
   cleanupStaleWorklists,
   setWorklistDir,
-  getWorklistDir
+  getWorklistDir,
+  sanitizeFileName
 };
