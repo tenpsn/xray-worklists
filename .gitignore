@@ -6,6 +6,7 @@ backend/data/
 backend/worklists/
 backend/mpps-state.json
 backend/logs/
+backend/orthanc-cleaner/data
 backend/settings.json
 
 frontend/.next/

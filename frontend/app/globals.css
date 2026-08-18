@@ -129,20 +129,26 @@ tbody tr:hover {
   overflow: hidden;
 }
 
-.lang-toggle button {
+.lang-toggle button,
+.lang-toggle a {
   background: white;
   color: #2563eb;
   border: none;
   border-radius: 0;
   padding: 8px 16px;
   font-size: 13px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
 
-.lang-toggle button:hover {
+.lang-toggle button:hover,
+.lang-toggle a:hover {
   background: #eff4ff;
 }
 
-.lang-toggle button.active {
+.lang-toggle button.active,
+.lang-toggle a.active {
   background: #2563eb;
   color: white;
 }
@@ -572,6 +578,7 @@ tbody tr:hover {
   }
 
   .lang-toggle button,
+  .lang-toggle a,
   .settings-link {
     padding: 6px 10px;
   }
