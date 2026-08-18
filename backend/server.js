@@ -11,6 +11,7 @@ const db = require('./db');
 const Mppsservice = require('./Mppsservice');
 const hl7Service = require('./hl7Service');
 const orthancCleanerRoutes = require('./orthanc-cleaner/routes');
+const iconv = require('iconv-lite');
 
 const app = express();
 const PORT = process.env.PORT;
@@ -46,8 +47,6 @@ app.use(express.json({ limit: '20mb' }));
 // โหลดการตั้งค่า (HIS MWL)
 let currentSettings = settingsService.loadSettings();
 
-let ishl7Enabled = currentSettings.mwl.usehl7 === true;
-
 // จำ XN ที่ถ่ายเสร็จแล้ว
 const mppsCompletedXNs = new Set();
 
@@ -62,36 +61,13 @@ function handleMppsStatusChange(accessionNumber, status) {
   }
 }
 
-function managehl7Service(settings) {
-  ishl7Enabled = settings.mwl.usehl7 === true;
-
-  if (ishl7Enabled) {
-    const hl7Port = settings.mwl.hl7Port || 2575; // เว้นว่าง = ใช้ 2575 กัน server.listen('') พังตอน save settings
-    // ใช้รอบเวลาเดียวกับ mwl.autoGenerate.intervalSec เพื่อให้ผู้ใช้ตั้งค่าที่เดียวคุมทั้ง HL7 worker และ auto-gen loop
-    const intervalMs = (settings.mwl.autoGenerate?.intervalSec || 10) * 1000;
-    hl7Service.starthl7Server(hl7Port, () => settings.mwl.lang, intervalMs);
-    console.log('[Server] ---> เปิดใช้งาน HL7');
-  } else {
-    hl7Service.stophl7Server();
-    console.log('[Server] ---> ปิดใช้งาน HL7');
-  }
-}
-
 async function applySettings(settings, options = {}) {
   const { exitOnMppsFailure = false, restartAutoGenLoop = true } = options;
   const warnings = [];
   let dbError = null;
   let dbSkipped = false;
 
-  // 1. HL7 listener เปิด/ปิดตามค่า mwl.usehl7
-  try {
-    managehl7Service(settings);
-  } catch (err) {
-    console.error('[Settings] ---> เปิดใช้งาน HL7 ไม่สำเร็จ:', err.message);
-    warnings.push(`เปิดใช้งาน HL7 ไม่สำเร็จ - ${err.message} กรุณาตรวจสอบ HL7 Port`);
-  }
-
-  // 2. โฟลเดอร์เก็บไฟล์ worklist
+  // 1. โฟลเดอร์เก็บไฟล์ worklist
   try {
     dicomService.setWorklistDir(settings.mwl.worklistDir);
   } catch (err) {
@@ -99,7 +75,7 @@ async function applySettings(settings, options = {}) {
     warnings.push(`ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${err.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${toDisplayPath(dicomService.getWorklistDir())}`);
   }
 
-  // 3. MPPS server
+  // 2. MPPS server
   try {
     await Mppsservice.startMppsServer(settings.mwl.mppsPort || 7001, handleMppsStatusChange);
   } catch (err) {
@@ -111,7 +87,7 @@ async function applySettings(settings, options = {}) {
     warnings.push(`เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ - ${err.message} ระบบจะยังไม่รับสถานะ MPPS จากเครื่อง Modality จนกว่าจะแก้ port ให้ถูกต้อง`);
   }
 
-  // 4. เชื่อมต่อฐานข้อมูล HIS
+  // 3. เชื่อมต่อฐานข้อมูล HIS
   const hisConfig = settings.his || {};
   if (hisConfig.host && hisConfig.database) {
     try {
@@ -135,7 +111,7 @@ async function applySettings(settings, options = {}) {
     console.log('[Server] ---> ยังไม่ได้ตั้งค่าฐานข้อมูล รอการตั้งค่าจากหน้าเว็บ');
   }
 
-  // 5. รีสตาร์ท background loop สร้างไฟล์ .wl อัตโนมัติ
+  // 4. รีสตาร์ท background loop สร้างไฟล์ .wl อัตโนมัติ
   if (restartAutoGenLoop) {
     startAutoWorklistLoop();
   }
@@ -192,7 +168,55 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
   if (hisSystem === 'hosxp') {
     return buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType);
   }
+  if (hisSystem === 'hl7') {
+    return buildHl7Query(dateback, dbType);
+  }
   return buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbType, xns_NN, xns_YN, xns_NY);
+}
+
+// HL7 - อ่านคิว order จากตาราง xray_request ที่ระบบ Gateway ฝั่ง HIS เขียนไว้
+// จำกัดช่วงวันตาม dateback เหมือน hosxp/softcon กันดึง backlog สะสมทั้งหมดย้อนหลังไม่จำกัด
+function buildHl7Query(dateback, dbType) {
+  const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 1;
+
+  let dateFilter;
+  if (dbType === 'mysql') {
+    dateFilter = `xray_request_datetime >= DATE_SUB(CURDATE(), INTERVAL $1 DAY)`;
+  } else if (dbType === 'mssql') {
+    dateFilter = `xray_request_datetime >= DATEADD(day, -$1, CAST(GETDATE() AS DATE))`;
+  } else {
+    dateFilter = `xray_request_datetime >= current_date - $1::integer`;
+  }
+
+  return {
+    sql: `SELECT xray_request_id, xray_request_xn, xray_request_data FROM xray_request WHERE xray_request_receive = 'N' AND ${dateFilter} ORDER BY xray_request_id ASC`,
+    params: [safeDateback],
+  };
+}
+
+// blob เก็บ HL7 message เป็น binary ดิบ ต้อง decode ตาม encoding จริงของฐานข้อมูล (มักเป็น TIS620 ไม่ใช่ UTF-8)
+function decodeHl7Blob(buffer, encoding) {
+  const enc = (encoding || '').toUpperCase();
+  if (enc === 'TIS620') return iconv.decode(buffer, 'tis620');
+  if (enc === 'WIN874' || enc === 'WINDOWS-874') return iconv.decode(buffer, 'windows-874');
+  return buffer.toString('utf8');
+}
+
+// แปลง row ดิบจากตาราง xray_request (blob เก็บ HL7 message) ให้เป็น record shape เดียวกับที่หน้าเว็บใช้แสดงผล
+function mapHl7RowsToRecords(rows, encoding) {
+  const records = [];
+  for (const row of rows) {
+    try {
+      const item = hl7Service.parsehl7ToWorklistItem(decodeHl7Blob(row.xray_request_data, encoding));
+      if (row.xray_request_xn) item.xn = row.xray_request_xn;
+      item.confirm = 'N';
+      item.confirm_read_film = 'N';
+      records.push(item);
+    } catch (err) {
+      console.error(`[HL7] ---> แปลงข้อมูล xray_request id ${row.xray_request_id} ไม่สำเร็จ:`, err.message);
+    }
+  }
+  return records;
 }
 
 // SoftCon - schema แบบ RadRequestHeader/RadRequest/Patient/Person/Visit
@@ -522,17 +546,23 @@ async function processWorklistFiles(records, displayLang) {
           // ใช้ sanitizer เดียวกับที่ dicomService สร้างชื่อไฟล์จริง ให้ตรงกับ MPPS ที่ตอบกลับมา
           const safeXn = dicomService.sanitizeFileName(record.xn);
 
-          if (record.confirm === 'Y' && record.confirm_read_film === 'Y') {
+          if (record.orderControl === 'CA') {
+            // ยกเลิก order จาก HL7 (ORC.1 = CA)
+            dicomService.deleteWorklistFile(record.xn);
+            mppsCompletedXNs.delete(safeXn);
+            mppsCompletedXNs.delete(record.xn);
+
+          } else if (record.confirm === 'Y' && record.confirm_read_film === 'Y') {
             dicomService.deleteWorklistFile(record.xn);
 
             // เคลียร์ความจำทิ้งด้วย เพราะกระบวนการจบสมบูรณ์ใน DB แล้ว
-            mppsCompletedXNs.delete(safeXn); 
+            mppsCompletedXNs.delete(safeXn);
             mppsCompletedXNs.delete(record.xn);
 
          } else if (mppsCompletedXNs.has(safeXn) || mppsCompletedXNs.has(record.xn)) {
             // ถ้าเครื่อง X-ray แจ้ง COMPLETED มาแล้ว ให้ "ข้าม" การสร้างไฟล์
             // (ไฟล์จะไม่ถูกสร้างใหม่แม้ใน HOSxP/SoftCon จะยังเป็นสถานะ 'N' ก็ตาม)
-            
+
           } else {
             // ถ้าหมอยังไม่ยืนยัน และเครื่อง X-ray ยังไม่ได้ถ่าย ถึงจะยอมสร้างไฟล์
             await dicomService.generateWorklistFile(record);
@@ -561,7 +591,6 @@ async function runAutoWorklistCycle() {
   }
 
   const cfg = currentSettings.mwl.autoGenerate || {};
-  if (cfg.enabled === false) return;
 
   isAutoGenRunning = true;
   try {
@@ -575,7 +604,9 @@ async function runAutoWorklistCycle() {
       currentSettings.his.hisSystem
     );
     const result = await db.query(sql, params);
-    const records = result.rows;
+    const records = currentSettings.his.hisSystem === 'hl7'
+      ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
+      : result.rows;
     if (records.length > 0) {
       await processWorklistFiles(records, currentSettings.mwl.lang);
     }
@@ -592,10 +623,6 @@ function startAutoWorklistLoop() {
     autoGenIntervalHandle = null;
   }
   const cfg = currentSettings.mwl.autoGenerate || {};
-  if (cfg.enabled === false) {
-    console.log('[Worklist Auto] ---> ปิดการสร้างไฟล์ .wl อัตโนมัติ');
-    return;
-  }
   const intervalMs = (cfg.intervalSec || 10) * 1000;
   autoGenIntervalHandle = setInterval(runAutoWorklistCycle, intervalMs);
   console.log(`[Worklist Auto] ---> เริ่มสร้างไฟล์ .wl อัตโนมัติทุก ${intervalMs / 1000} วินาที`);
@@ -626,13 +653,15 @@ app.post('/api/xray-report', async (req, res) => {
     );
 
     const result = await db.query(sql, params);
-    const records = result.rows;
+    const records = currentSettings.his.hisSystem === 'hl7'
+      ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
+      : result.rows;
 
     records.forEach((record) => {
       record.lang = displayLang;
     });
 
-    res.json({ success: true, count: result.rowCount, data: records });
+    res.json({ success: true, count: records.length, data: records });
 
     if (records.length > 0) {
       processWorklistFiles(records, displayLang).catch((err) => {

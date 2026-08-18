@@ -1,31 +1,3 @@
-const net = require('net');
-const dicomService = require('./dicomService');
-const xrayQueueDb = require('./xrayQueueDb');
-
-let getDisplayLang = () => 'en';
-
-// ตัวอักษรพิเศษสำหรับ MLLP Protocol (มาตรฐานการส่ง hl7 ผ่าน TCP)
-const VT = String.fromCharCode(0x0b); // Start block
-const FS = String.fromCharCode(0x1c); // End block
-const CR = String.fromCharCode(0x0d); // Carriage return
-
-// ฟังก์ชันสร้างข้อความตอบกลับ (ACK)
-function generateACK(mshSegment, ackCode = 'AA', message = 'Message accepted') {
-  const msh = mshSegment.split('|');
-  const sendingApp = msh[2] || '';
-  const sendingFac = msh[3] || '';
-  const recvApp = msh[4] || '';
-  const recvFac = msh[5] || '';
-  const msgControlID = msh[9] || '';
-  const datetime = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-
-  // สลับผู้ส่ง-ผู้รับ และสร้าง MSA segment
-  const ackMSH = `MSH|^~\\&|${recvApp}|${recvFac}|${sendingApp}|${sendingFac}|${datetime}||ACK|${msgControlID}|P|2.3`;
-  const ackMSA = `MSA|${ackCode}|${msgControlID}|${message}`;
-  
-  return `${VT}${ackMSH}\r${ackMSA}\r${FS}${CR}`;
-}
-
 // แปลงวันเวลาแบบ hl7 (TS) เช่น 20260723120000 หรือ 20260723 ให้เป็น Date object
 // คืนค่า null ถ้าแปลงไม่ได้/ไม่มีข้อมูล เพื่อให้ผู้เรียกไป fallback เป็นเวลาปัจจุบันแทน
 function parsehl7DateTime(ts) {
@@ -45,7 +17,8 @@ function parsehl7DateTime(ts) {
 
 // ฟังก์ชันแกะข้อความ hl7 เป็น Object สำหรับสร้าง Worklist
 function parsehl7ToWorklistItem(hl7Data) {
-  const segments = hl7Data.split('\r');
+  // segment คั่นด้วย \r ตาม spec แต่บาง HIS ส่งมาเป็น \r\n จริง แยกให้ครอบคลุมทั้งสองแบบ
+  const segments = hl7Data.split(/\r\n|\r|\n/);
   let msh = [], pid = [], obr = [], orc = [];
 
   segments.forEach(segment => {
@@ -55,39 +28,48 @@ function parsehl7ToWorklistItem(hl7Data) {
     if (segment.startsWith('OBR')) obr = segment.split('|');
   });
 
+  // ORC.1 Order Control: NW = order ใหม่, CA = ขอยกเลิก order
+  const orderControl = (orc[1] || 'NW').toUpperCase();
+
   if (!pid.length || (!obr.length && !orc.length)) {
     throw new Error('ข้อความ hl7 ไม่สมบูรณ์ (ขาด PID, ORC หรือ OBR)');
   }
 
-  // ใช้ mwl.lang ที่ตั้งไว้ในหน้า Settings เป็นค่าเริ่มต้นของภาษาแสดงผล
-  // (โหมด hl7 ไม่มี request จากหน้าเว็บมากำหนด lang ต่อครั้งเหมือนโหมดดึงจาก DB ปกติ)
-  const displayLang = getDisplayLang() === 'en' ? 'en' : 'th';
-
   // แกะข้อมูลคนไข้ (PID)
   const patientId = (pid[3] || '').split('^')[0]; // HN
-  const patientNameParts = (pid[5] || '').split('^'); // นามสกุล^ชื่อ
+  const cid = pid[4] || '';
+  const patientNameParts = (pid[5] || '').split('^'); // นามสกุล^ชื่อ^กลาง^คำนำหน้าท้าย^คำนำหน้า
   const lname = patientNameParts[0] || '';
   const fname = patientNameParts[1] || '';
+  const pname = patientNameParts[4] || patientNameParts[3] || ''; // คำนำหน้า
   const dob = pid[7] || ''; // YYYYMMDD
-  const hl7Sex = pid[8] || 'O'; 
+  const hl7Sex = pid[8] || 'O';
   const sex = hl7Sex === 'M' ? '1' : hl7Sex === 'F' ? '2' : 'O';
 
   // แกะข้อมูลรายการออเดอร์ (OBR / ORC)
   const accessionNumber = (obr[3] || orc[2] || '').split('^')[0] || `XN${Date.now()}`;
-  const procedureInfo = (obr[4] || '').split('^'); 
+  const procedureInfo = (obr[4] || '').split('^');
   const procedureCode = procedureInfo[0] || ''; // รหัส X-ray
   const procedureDesc = procedureInfo[1] || procedureCode; // ชื่อ X-ray
-  const doctorName = (obr[16] || orc[12] || '').replace(/\^/g, ' ').trim();
-  const modality = (obr[24] || 'CR');
+  // component แรกเป็นรหัสหมอ (ID) ตัดทิ้ง เหลือแต่ชื่อให้เหมือน mode อื่น
+  const doctorParts = (obr[16] || orc[12] || '').split('^');
+  const doctorName = (doctorParts.slice(1).join(' ') || doctorParts[0] || '').trim();
+  // OBR.24 บางไซต์ส่งเป็น "code^text" ไม่ใช่ DICOM code เดี่ยว เชื่อไม่ได้ ปล่อยว่างให้ dicomService fallback เป็น CR เหมือน hosxp/softcon
+  const modality = '';
+  // OBR.18 แผนก บางไซต์ส่งแค่รหัส บางไซต์ส่ง "รหัส^ชื่อแผนก" เอาชื่อถ้ามี ไม่มีก็ใช้รหัสแทน
+  const deptInfo = (obr[18] || '').split('^');
+  const department = deptInfo[1] || deptInfo[0] || '';
 
-  // ดึงวันเวลาที่สั่งตรวจจริงจาก OBR-7 (Observation Date/Time) หรือ OBR-6 (Requested Date/Time)
+  // ดึงวันเวลาที่สั่งตรวจจริงจาก OBR-6 (Requested Date/Time) ไม่ใช้ OBR-7
   // ถ้าไม่มี/แปลงไม่ได้ ค่อย fallback เป็นเวลาปัจจุบัน ณ ตอนรับข้อความ
-  const requestedDateTime = parsehl7DateTime(obr[7]) || parsehl7DateTime(obr[6]) || new Date();
+  const requestedDateTime = parsehl7DateTime(obr[6]) || new Date();
 
-  // จัดโครงสร้างให้ตรงกับที่ dicomService ต้องการ
+  // จัดโครงสร้างให้ตรงกับที่ dicomService ต้องการ (record.lang จะถูกผู้เรียกเขียนทับตาม lang ที่ผู้ใช้เลือกอีกที)
   return {
     xn: accessionNumber,
     hn: patientId,
+    cid: cid,
+    pname: pname,
     fname: fname,
     lname: lname,
     birthday: dob,
@@ -98,142 +80,12 @@ function parsehl7ToWorklistItem(hl7Data) {
     Doctor: doctorName,
     xraylist: procedureDesc,
     xray_items_code: procedureCode,
-    lang: displayLang
+    department_name: department,
+    lang: 'en',
+    orderControl: orderControl
   };
 }
 
-let server = null;
-let workerTimer = null;
-let isProcessingQueue = false; // กันรอบซ้อน เผื่อรอบก่อนยังไม่เสร็จ (dump2dcm ช้า)
-
-// ดึงงานค้าง (receive = 'N') จากคิว มาสร้างไฟล์ worklist ทีละรายการ
-async function processPendingRequests() {
-  if (isProcessingQueue) return;
-  isProcessingQueue = true;
-  try {
-    const pending = xrayQueueDb.getPendingRequests();
-    for (const row of pending) {
-      try {
-        const worklistItem = parsehl7ToWorklistItem(row.xray_request_data);
-        // ใช้ xn ที่บันทึกไว้ตอนรับเข้าคิว ไม่ใช้ที่ parse ใหม่ตรงนี้ เพราะ fallback `XN${Date.now()}` จะได้คนละค่ากับตอนรับถ้าไม่มี OBR-3/ORC-2
-        if (row.xray_request_xn) {
-          worklistItem.xn = row.xray_request_xn;
-        }
-        await dicomService.generateWorklistFile(worklistItem);
-        xrayQueueDb.markReceived(row.xray_request_id);
-        console.log(`[HL7 Service] ---> สร้างไฟล์ Worklist จากคิวสำเร็จ XN: ${worklistItem.xn}`);
-      } catch (error) {
-        // ปล่อย receive ไว้เป็น 'N' รอ worker รอบถัดไปมาลองใหม่
-        console.error(`[HL7 Service] ---> ประมวลผลคิว id ${row.xray_request_id} ไม่สำเร็จ:`, error.message);
-      }
-    }
-  } finally {
-    isProcessingQueue = false;
-  }
-}
-
-function startWorklistWorker(intervalMs = 2000) {
-  if (workerTimer) return;
-  workerTimer = setInterval(() => {
-    processPendingRequests().catch((err) => console.error('[HL7 Service] ---> Worker Error:', err.message));
-  }, intervalMs);
-}
-
-function stopWorklistWorker() {
-  if (workerTimer) {
-    clearInterval(workerTimer);
-    workerTimer = null;
-  }
-}
-
-function starthl7Server(port = 2575, getLang, intervalMs = 2000) {
-  if (server) {
-    server.close();
-  }
-
-  if (typeof getLang === 'function') {
-    getDisplayLang = getLang;
-  }
-
-  // รับข้อความ hl7 1 ก้อน (ไม่รวม VT/FS/CR ที่ครอบอยู่) แล้วตอบ ACK/NAK กลับไปที่ socket
-  // ตัวจริง (สร้างไฟล์ worklist) แยกไปทำใน worker เพื่อให้ตอบ HIS ได้เร็ว ไม่ต้องรอ dcmtk
-  async function handlehl7Message(hl7Message, socket) {
-    const mshSegment = hl7Message.split('\r')[0];
-    const msgType = (mshSegment.split('|')[8] || '');
-    try {
-      // 1. ตรวจโครงสร้างข้อความก่อน (ต้องมี PID + ORC/OBR) เพื่อ reject ข้อความที่ parse ไม่ได้ตั้งแต่ตรงนี้
-      const worklistItem = parsehl7ToWorklistItem(hl7Message);
-
-      // 2. บันทึกข้อความดิบลงคิว (xray_request, receive='N') รอ worker มาสร้างไฟล์ worklist ต่อ
-      xrayQueueDb.insertRequest(worklistItem.xn, msgType, hl7Message);
-      console.log(`[HL7 Service] ---> รับ Order เข้าคิวสำเร็จ XN: ${worklistItem.xn}`);
-
-      // 3. ตอบกลับ HIS ว่ารับสำเร็จ (ACK)
-      const ackMsg = generateACK(mshSegment, 'AA', 'Success');
-      socket.write(ackMsg);
-
-    } catch (error) {
-      console.error('[HL7 Service] ---> Error Processing HL7:', error.message);
-      // ตอบกลับ HIS ว่าเกิดข้อผิดพลาด (AE = Application Error)
-      const nakMsg = generateACK(mshSegment, 'AE', error.message);
-      socket.write(nakMsg);
-    }
-  }
-
-  server = net.createServer((socket) => {
-    let buffer = '';
-    let processing = Promise.resolve(); // ต่อคิวประมวลผลทีละข้อความ
-
-    socket.on('data', (data) => {
-      buffer += data.toString();
-
-      let fsIndex;
-      while ((fsIndex = buffer.indexOf(FS + CR)) !== -1) {
-        const vtIndex = buffer.indexOf(VT);
-
-        if (vtIndex === -1 || vtIndex > fsIndex) {
-          buffer = buffer.substring(fsIndex + 2);
-          continue;
-        }
-
-        const hl7Message = buffer.substring(vtIndex + 1, fsIndex);
-        buffer = buffer.substring(fsIndex + 2);
-
-        // ต่อคิวประมวลผลทีละข้อความตามลำดับที่รับเข้ามา
-        processing = processing.then(() => handlehl7Message(hl7Message, socket));
-      }
-    });
-
-    socket.on('error', (err) => console.error('[HL7 Service] Socket Error:', err.message));
-  });
-
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`[HL7 Service] ---> พอร์ต ${port} ถูกใช้งานอยู่แล้ว`);
-    } else {
-      console.error('[HL7 Service] ---> Server Error:', err.message);
-    }
-  });
-
-  server.listen(port, () => {
-    console.log(`[HL7 Service] ---> เริ่ม MLLP Listener รอรับข้อมูล HL7 ที่พอร์ต ---> ${port}`);
-  });
-
-  // เคลียร์ timer เก่าก่อนเสมอ เพื่อให้รอบเวลาใหม่ (intervalMs) มีผลจริงเวลาผู้ใช้แก้ค่าในหน้าตั้งค่า
-  stopWorklistWorker();
-  startWorklistWorker(intervalMs);
-}
-
-function stophl7Server() {
-  stopWorklistWorker();
-  if (server) {
-    server.close();
-    console.log('[HL7 Service] ---> ปิดการเชื่อมต่อ HL7');
-    server = null;
-  }
-}
-
-module.exports = { 
-  starthl7Server, 
-  stophl7Server 
+module.exports = {
+  parsehl7ToWorklistItem,
 };

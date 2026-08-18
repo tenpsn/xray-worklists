@@ -8,7 +8,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const DEFAULT_FORM = {
   his: {
-    hisSystem: '', // 'hosxp' | 'softcon'
+    hisSystem: '', // 'hosxp' | 'softcon' | 'hl7'
     dbType: '',
     host: '',
     port: '',
@@ -18,16 +18,13 @@ const DEFAULT_FORM = {
     encoding: 'UTF8', // 'UTF8' | 'TIS620' | 'WIN874'
   },
   mwl: {
-    usehl7: false,
-    hl7Port: '',
     lang: '', // ภาษาเริ่มต้นสำหรับออเดอร์ที่รับผ่าน hl7
     aet: '', // AET ของ Worklist Server เช่น Orthanc
     port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
-    mppsPort: '', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
+    mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
-      enabled: true, // สร้างไฟล์ .wl อัตโนมัติจากฐานข้อมูล HIS ตรง (ปิดได้ถ้าใช้ HL7 อย่างเดียว)
-      intervalSec: 10, // รอบเวลา ใช้ร่วมกันทั้ง auto-gen loop และ HL7 worker
+      intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
     },
   },
 };
@@ -234,6 +231,7 @@ export default function SettingsPage() {
               <option value="" disabled>{dict.selectHisPlaceholder}</option>
               <option value="hosxp">HOSxP</option>
               <option value="softcon">SoftCon</option>
+              <option value="hl7">HL7</option>
             </select>
           </label>
 
@@ -318,40 +316,6 @@ export default function SettingsPage() {
         <h2>{dict.mwlSectionTitle}</h2>
         <div className="settings-grid">
           <label>
-            {dict.hl7Label}
-            <select
-              value={form.mwl.usehl7 ? 'true' : 'false'}
-              onChange={(e) => updateMwl('usehl7', e.target.value === 'true')}
-            >
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
-            </select>
-          </label>
-          {form.mwl.usehl7 && (
-            <>
-              <label>
-                {dict.hl7PortLabel}
-                <input
-                  type="text"
-                  placeholder={dict.hl7PortPlaceholder}
-                  value={form.mwl.hl7Port}
-                  onChange={(e) => updateMwl('hl7Port', e.target.value)}
-                />
-              </label>
-              <label>
-                {dict.hl7LangLabel}
-                <select
-                  value={form.mwl.lang === 'th' ? 'th' : 'en'}
-                  onChange={(e) => updateMwl('lang', e.target.value)}
-                >
-                  <option value="th">TH</option>
-                  <option value="en">ENG</option>
-                </select>
-              </label>
-            </>
-          )}
-
-          <label>
             {dict.aetLabel}
             <input
               type="text"
@@ -407,17 +371,6 @@ export default function SettingsPage() {
           </label>
 
           <label>
-            {dict.autoGenLabel}
-            <select
-              value={form.mwl.autoGenerate.enabled ? 'true' : 'false'}
-              onChange={(e) => updateAutoGenerate('enabled', e.target.value === 'true')}
-            >
-              <option value="false">Disabled</option>
-              <option value="true">Enabled</option>
-            </select>
-          </label>
-
-          <label>
             {dict.intervalLabel}
             <input
               type="number"
@@ -428,10 +381,6 @@ export default function SettingsPage() {
             />
           </label>
         </div>
-
-        <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
-          {dict.intervalNote}
-        </p>
       </div>
 
       <div className="settings-actions">

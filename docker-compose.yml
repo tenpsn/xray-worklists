@@ -4,6 +4,8 @@ services:
     env_file: ./backend/.env
     ports:
       - "4000:4000"
+      - "4242:4242"
+      - "7000:7000"
       - "7001:7001" # MPPS - ต้องตรงกับ mppsPort ที่ตั้งไว้ในหน้า Settings (ค่า default 7001)
     volumes:
       - ./backend:/app
@@ -16,7 +18,7 @@ services:
       - type: bind
         source: D:\
         target: /mnt/hostD
-    mem_limit: 300m
+    mem_limit: 500m
     restart: unless-stopped
 
   frontend:

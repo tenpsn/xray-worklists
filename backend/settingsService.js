@@ -18,15 +18,12 @@ const DEFAULT_SETTINGS = {
     encoding: process.env.DB_ENCODING || '',
   },
   mwl: {
-    usehl7: process.env.USE_hl7 === 'true' || false,
-    hl7Port:process.env.hl7_PORT || '',
     lang: process.env.MWL_LANG === 'th' ? 'th' : 'en',
     aet: process.env.MWL_AET || '',
     port: process.env.MWL_PORT || '',
     mppsPort: process.env.MPPS_PORT || '', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
     autoGenerate: {
-      enabled: process.env.AUTO_GENERATE !== 'false', 
       intervalSec: Number(process.env.AUTO_GENERATE_INTERVAL_SEC) || 10,
       dateback: Number(process.env.AUTO_GENERATE_DATEBACK) || 1,
       include: process.env.AUTO_GENERATE_INCLUDE || '',

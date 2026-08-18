@@ -296,9 +296,17 @@ docker compose down --rmi all
 - **`db.js`** — เชื่อมต่อฐานข้อมูล รองรับทั้ง Postgres และ MySQL สลับกันได้ตาม Settings (จัดการ encoding ไทยให้ด้วย)
 - **`dicomService.js`** — แปลงข้อมูลคนไข้เป็นไฟล์ `.wl` (แปลงชื่อไทยเป็นคาราโอเกะถ้าเลือกอังกฤษ) ใช้ `dump2dcm.exe` แปลง `.dump` เป็น `.wl`
 - **`mppsService.js`** — เปิด server แยก (พอร์ต 7001) รับสถานะ "เริ่มตรวจ"/"ตรวจเสร็จ" จากเครื่อง Modality แล้วลบไฟล์ worklist เมื่อเสร็จ
-- **`hl7Service.js`** — (ทางเลือก) ถ้าเปิดโหมด HL7 จะรับข้อความจากระบบอื่นเพิ่มเข้ามาอีกทาง เก็บลงคิว (ไฟล์ `xrayQueueDb.js`, SQLite แยกต่างหาก ไม่แตะ DB ของ HIS) แล้วตอบ ACK กลับทันที จากนั้น worker เบื้องหลังจะทยอยแปลงเป็นไฟล์ worklist อีกที โดยไม่หยุดการดึงข้อมูลจาก DB ตามปกติ
-- **`xrayQueueDb.js`** — คิว SQLite (`backend/data/xray_queue.db`) เก็บข้อความ HL7 ดิบที่รับเข้ามา รอ worker มาประมวลผลเป็นไฟล์ worklist
+- **`hl7Service.js`** — ฟังก์ชันแปลงข้อความ HL7 เป็นข้อมูล worklist (`parsehl7ToWorklistItem`) ใช้กับ HIS System แบบ **HL7** (ดูหัวข้อ HIS System ด้านล่าง)
 - **`settingsService.js`** — โหลด/บันทึกการตั้งค่า HIS DB และ MWL ลงไฟล์ `settings.json`
+
+### HIS System ที่รองรับ (เลือกในหน้า Settings)
+
+- **HOSxP** / **SoftCon** — poll DB ตรง อ่าน table ของ HIS นั้นๆ โดยตรง (เช่น `xray_report`/`patient` สำหรับ HOSxP)
+- **HL7** — ใช้กับไซต์ที่มี Gateway อื่น (เช่น BMS PACs Gateway) รับ HL7 จาก HIS แล้วเก็บ raw message ไว้เป็น blob ในตาราง `xray_request` (column `xray_request_data`) อยู่แล้ว โหมดนี้แค่ไป **อ่าน** table นั้นตรงๆ (`SELECT ... WHERE xray_request_receive = 'N'`) แปลง blob เป็นข้อมูลคนไข้ด้วย `parsehl7ToWorklistItem` แล้วแสดง/สร้างไฟล์ worklist เหมือนโหมดอื่น — **ไม่เขียนอะไรกลับเข้า DB ของ HIS เลย** (อ่านอย่างเดียว เหมือน HOSxP/SoftCon)
+  - encoding ของ blob มักเป็น **TIS620** ไม่ใช่ UTF-8 (HOSxP รุ่นเก่าเก็บภาษาไทยแบบนี้) ต้องตั้ง Encoding = TIS620 ในหน้า Settings ไม่งั้นชื่อคนไข้จะเพี้ยน
+  - segment ในข้อความ HL7 บางไซต์คั่นด้วย `\r\n` บางไซต์คั่นด้วย `\r` เดี่ยวๆ โค้ดรองรับทั้งคู่
+  - field ที่ดึงมาแสดง: HN/CID/ชื่อ-นามสกุล/คำนำหน้า (จาก PID), เลข XN/รายการตรวจ/แผนก (จาก ORC/OBR) — field "Group" (หมวดหมู่รายการ) ไม่มีข้อมูลใน HL7 จึงว่างเสมอในโหมดนี้
+  - ORC.1 = `CA` (ยกเลิก order) จะลบไฟล์ worklist แทนการสร้าง/อัปเดต
 
 **Frontend**
 
@@ -320,7 +328,7 @@ docker compose down --rmi all
 - **`mem_limit`** ใน `docker-compose.yml` — ถ้า backend กินแรมเกิน 300m หรือ frontend เกิน 400m Docker จะ OOM-kill container นั้น แล้ว `restart: unless-stopped` จะสั่งให้กลับมารันใหม่ให้อัตโนมัติ (เทียบเท่า `max_memory_restart` ของ PM2 เดิม)
 - **Uncaught exception / unhandled rejection** — ถ้าเกิด error ที่ไม่ได้ดักไว้ ระบบจะ log แล้วปิดโปรแกรมทันที (`process.exit(1)`) แทนที่จะทำงานต่อในสภาพ state เพี้ยน แล้วปล่อยให้ `restart: unless-stopped` ของ Docker สั่ง container เริ่มใหม่แบบสะอาด
 - **Port ชนกัน** — ถ้า backend เปิดไม่สำเร็จเพราะมีโปรแกรมอื่นใช้ port นั้นอยู่แล้ว ระบบจะปิดโปรแกรมทันทีพร้อม log ชัดเจน ส่วน MPPS server ถ้าเปิดไม่สำเร็จตอนสตาร์ทเครื่องถือว่าร้ายแรงและปิดโปรแกรมเช่นกัน แต่ถ้าเปลี่ยน MPPS port จากหน้าเว็บ Settings แล้วเปิดไม่สำเร็จ จะแค่แจ้งเตือน ไม่ปิดทั้งระบบ
-- **เปลี่ยน port ผ่านหน้า Settings (MPPS/HL7) ตอนรันด้วย Docker** — Docker publish port แบบตายตัวตอน container start เท่านั้น ถ้าเปลี่ยน `mppsPort` หรือเปิด HL7 พร้อมตั้ง `hl7Port` ใหม่ผ่านหน้าเว็บ ต้องไปแก้ `ports:` ใน `docker-compose.yml` ให้ตรงกับพอร์ตใหม่ด้วย แล้ว `docker compose up -d` ใหม่ ไม่งั้นเครื่อง Modality/ระบบ HIS อื่นจะเชื่อมเข้ามาไม่ได้ (ปัจจุบัน HL7 ปิดอยู่ จึงยังไม่มี HL7 port ใน `docker-compose.yml`)
+- **เปลี่ยน port ผ่านหน้า Settings (MPPS) ตอนรันด้วย Docker** — Docker publish port แบบตายตัวตอน container start เท่านั้น ถ้าเปลี่ยน `mppsPort` ผ่านหน้าเว็บ ต้องไปแก้ `ports:` ใน `docker-compose.yml` ให้ตรงกับพอร์ตใหม่ด้วย แล้ว `docker compose up -d` ใหม่ ไม่งั้นเครื่อง Modality จะเชื่อมเข้ามาไม่ได้
 - **`GET /health`** ทดสอบเชื่อมต่อฐานข้อมูลจริงด้วย (`SELECT 1`) ไม่ใช่แค่เช็คว่า process ยังไม่ตาย — ถ้าต่อ DB ไม่ได้จะตอบ HTTP `503` เหมาะสำหรับให้เครื่องมือ monitor ภายนอกเรียกเช็คเป็นระยะ
 
 ### หมายเหตุอื่นๆ

@@ -15,20 +15,32 @@ export default function Page() {
   const dict = fullDict.worklists;
   const nav = fullDict.nav;
 
-  const [dateback, setDateback] = useState(1);
-  const [include, setInclude] = useState('');
-  const [exclude, setExclude] = useState('');
-  const [confirm, setConfirm] = useState(false);
+  // อ่านค่า filter ที่บันทึกไว้จาก localStorage เพราะสลับภาษาแล้วหน้านี้ remount ใหม่ ค่าจากหน้าเว็บก่อนหน้าจะหายถ้าไม่เก็บไว้
+  function loadSavedFilters() {
+    if (typeof window === 'undefined') return { dateback: 1, include: '', exclude: '', confirm: false };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('worklistFilters'));
+      return {
+        dateback: Number(saved?.dateback) > 0 ? Number(saved.dateback) : 1,
+        include: saved?.include || '',
+        exclude: saved?.exclude || '',
+        confirm: saved?.confirm === true,
+      };
+    } catch {
+      return { dateback: 1, include: '', exclude: '', confirm: false };
+    }
+  }
+
+  const savedFilters = loadSavedFilters();
+  const [dateback, setDateback] = useState(savedFilters.dateback);
+  const [include, setInclude] = useState(savedFilters.include);
+  const [exclude, setExclude] = useState(savedFilters.exclude);
+  const [confirm, setConfirm] = useState(savedFilters.confirm);
   const [rows, setRows] = useState([]);
   const [status, setStatus] = useState(dict.statusLoading);
 
   // เก็บค่าที่ใช้ค้นหาจริงล่าสุด (ตอนกดปุ่มค้นหา)
-  const appliedFilters = useRef({
-    dateback: 1,
-    include: '',
-    exclude: '',
-    confirm: false
-  });
+  const appliedFilters = useRef(savedFilters);
 
   // ใช้ Map เพื่อเก็บ XN พร้อมสถานะล่าสุด เช่น { "123": { confirm: "N", confirm_read_film: "N" } }
   const loadedXNsMap = useRef(new Map());
@@ -153,6 +165,12 @@ export default function Page() {
       isLoadingRef.current = false;
     }
   }
+
+  // เซฟค่าที่พิมพ์ไว้ตลอด แม้ยังไม่กด Search กันหายตอนสลับภาษา (หน้านี้ remount ใหม่ทุกครั้งที่เปลี่ยน lang)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('worklistFilters', JSON.stringify({ dateback, include, exclude, confirm }));
+  }, [dateback, include, exclude, confirm]);
 
   const loadDataRef = useRef(loadData);
   useEffect(() => {
