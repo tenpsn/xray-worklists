@@ -23,6 +23,10 @@ const DEFAULT_FORM = {
     port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
     mppsPort: '', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
+    autoGenerate: {
+      enabled: true, // สร้างไฟล์ .wl อัตโนมัติจากฐานข้อมูล HIS ตรง (ปิดได้ถ้าใช้ HL7 อย่างเดียว)
+      intervalSec: 10, // รอบเวลา ใช้ร่วมกันทั้ง auto-gen loop และ HL7 worker
+    },
   },
 };
 
@@ -86,6 +90,13 @@ export default function SettingsPage() {
 
   function updateMwl(field, value) {
     setForm((prev) => ({ ...prev, mwl: { ...prev.mwl, [field]: value } }));
+  }
+
+  function updateAutoGenerate(field, value) {
+    setForm((prev) => ({
+      ...prev,
+      mwl: { ...prev.mwl, autoGenerate: { ...prev.mwl.autoGenerate, [field]: value } },
+    }));
   }
 
   // เปิดหน้าต่างเลือกโฟลเดอร์ โดยเริ่มดูจาก path ที่กรอกไว้อยู่แล้ว (ถ้ามี)
@@ -380,11 +391,38 @@ export default function SettingsPage() {
                 </button>
               )}
             </div>
+            {worklistDirActive && (
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                โฟลเดอร์ที่ใช้งานอยู่จริงตอนนี้: <code>{worklistDirActive}</code>
+              </div>
+            )}
+          </label>
+
+          <label>
+            สร้างไฟล์ Worklist อัตโนมัติจาก DB
+            <select
+              value={form.mwl.autoGenerate.enabled ? 'true' : 'false'}
+              onChange={(e) => updateAutoGenerate('enabled', e.target.value === 'true')}
+            >
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select>
+          </label>
+
+          <label>
+            รอบเวลาสร้างไฟล์ Worklist (วินาที)
+            <input
+              type="number"
+              min="1"
+              placeholder="เช่น 10"
+              value={form.mwl.autoGenerate.intervalSec}
+              onChange={(e) => updateAutoGenerate('intervalSec', Number(e.target.value) || 1)}
+            />
           </label>
         </div>
 
         <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
-          {worklistDirActive && (<>โฟลเดอร์ที่ใช้งานอยู่จริงตอนนี้: <code>{worklistDirActive}</code></>)}
+          รอบเวลานี้ใช้ร่วมกันทั้งการดึงข้อมูลตรงจาก DB และ worker ของ HL7 (สร้างไฟล์จากคิว HL7) — เปิดได้ทั้งสองอย่างพร้อมกันหรือเลือกเปิดแค่อย่างเดียว
         </p>
       </div>
 
@@ -392,7 +430,7 @@ export default function SettingsPage() {
         <button onClick={handleSave} disabled={saving}>
           {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
         </button>
-        <a className="back-link" href="/">← กลับหน้ารายงาน</a>
+        <a className="back-link" href="/worklists">← กลับหน้ารายงาน</a>
       </div>
 
       {pickerOpen && (

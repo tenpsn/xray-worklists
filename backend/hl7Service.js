@@ -146,7 +146,7 @@ function stopWorklistWorker() {
   }
 }
 
-function starthl7Server(port = 2575, getLang) {
+function starthl7Server(port = 2575, getLang, intervalMs = 2000) {
   if (server) {
     server.close();
   }
@@ -219,7 +219,9 @@ function starthl7Server(port = 2575, getLang) {
     console.log(`[HL7 Service] ---> เริ่ม MLLP Listener รอรับข้อมูล HL7 ที่พอร์ต ---> ${port}`);
   });
 
-  startWorklistWorker();
+  // เคลียร์ timer เก่าก่อนเสมอ เพื่อให้รอบเวลาใหม่ (intervalMs) มีผลจริงเวลาผู้ใช้แก้ค่าในหน้าตั้งค่า
+  stopWorklistWorker();
+  startWorklistWorker(intervalMs);
 }
 
 function stophl7Server() {

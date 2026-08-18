@@ -10,6 +10,7 @@ const settingsService = require('./settingsService');
 const db = require('./db');
 const Mppsservice = require('./Mppsservice');
 const hl7Service = require('./hl7Service');
+const orthancCleanerRoutes = require('./orthanc-cleaner/routes');
 
 const app = express();
 const PORT = process.env.PORT;
@@ -66,7 +67,9 @@ function managehl7Service(settings) {
 
   if (ishl7Enabled) {
     const hl7Port = settings.mwl.hl7Port || 2575; // เว้นว่าง = ใช้ 2575 กัน server.listen('') พังตอน save settings
-    hl7Service.starthl7Server(hl7Port, () => settings.mwl.lang);
+    // ใช้รอบเวลาเดียวกับ mwl.autoGenerate.intervalSec เพื่อให้ผู้ใช้ตั้งค่าที่เดียวคุมทั้ง HL7 worker และ auto-gen loop
+    const intervalMs = (settings.mwl.autoGenerate?.intervalSec || 10) * 1000;
+    hl7Service.starthl7Server(hl7Port, () => settings.mwl.lang, intervalMs);
     console.log('[Server] ---> เปิดใช้งาน HL7');
   } else {
     hl7Service.stophl7Server();
@@ -93,7 +96,7 @@ async function applySettings(settings, options = {}) {
     dicomService.setWorklistDir(settings.mwl.worklistDir);
   } catch (err) {
     console.error('[Settings] ---> ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ:', err);
-    warnings.push(`ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${err.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${dicomService.getWorklistDir()}`);
+    warnings.push(`ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${err.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${toDisplayPath(dicomService.getWorklistDir())}`);
   }
 
   // 3. MPPS server
@@ -374,11 +377,13 @@ app.get('/health', async (req, res) => {
   }
 });
 
+app.use('/api/orthanc', orthancCleanerRoutes);
+
 app.get('/api/settings', (req, res) => {
   res.json({
     success: true,
     settings: maskSecrets(currentSettings),
-    worklistDirActive: dicomService.getWorklistDir(), // path จริงที่ใช้งานอยู่ตอนนี้ (เผื่อฟิลด์ว่างไว้แล้วใช้ค่า default)
+    worklistDirActive: toDisplayPath(dicomService.getWorklistDir()), // path จริงที่ใช้งานอยู่ตอนนี้ (เผื่อฟิลด์ว่างไว้แล้วใช้ค่า default)
   });
 });
 
@@ -453,7 +458,7 @@ app.post('/api/settings', async (req, res) => {
       return res.json({
         success: true,
         settings: maskSecrets(currentSettings),
-        worklistDirActive: dicomService.getWorklistDir(),
+        worklistDirActive: toDisplayPath(dicomService.getWorklistDir()),
         message: `บันทึกการตั้งค่าเรียบร้อย กรอกข้อมูลฐานข้อมูลไม่ครบ ไม่ได้ทดสอบเชื่อมต่อ${warningText}`,
       });
     }
@@ -462,7 +467,7 @@ app.post('/api/settings', async (req, res) => {
       return res.json({
         success: true,
         settings: maskSecrets(currentSettings),
-        worklistDirActive: dicomService.getWorklistDir(),
+        worklistDirActive: toDisplayPath(dicomService.getWorklistDir()),
         message: `บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ${warningText}`,
       });
     }
@@ -471,7 +476,7 @@ app.post('/api/settings', async (req, res) => {
     return res.json({
       success: false,
       settings: maskSecrets(currentSettings),
-      worklistDirActive: dicomService.getWorklistDir(),
+      worklistDirActive: toDisplayPath(dicomService.getWorklistDir()),
       message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}${warningText}`,
       error: dbError.message,
     });
@@ -666,6 +671,53 @@ function listWindowsDrives() {
   return drives;
 }
 
+// ตอนรันใน Docker (Linux) จะเห็นแค่ไดรฟ์ host ที่ mount เข้ามาผ่าน docker-compose.yml เท่านั้น
+// (ต่างจาก win32 ที่เห็นได้ทุกไดรฟ์แบบสด ๆ รวม USB ที่เสียบทีหลัง)
+const HOST_DRIVE_MOUNTS = [
+  { name: 'C:', path: '/mnt/hostC' },
+  { name: 'D:', path: '/mnt/hostD' },
+];
+
+function listMountedHostDrives() {
+  return HOST_DRIVE_MOUNTS.filter((m) => {
+    try {
+      return fs.existsSync(m.path);
+    } catch (err) {
+      return false;
+    }
+  });
+}
+
+function isHostDriveMountRoot(p) {
+  return listMountedHostDrives().some((m) => path.resolve(m.path) === p);
+}
+
+// path ข้างในเครื่องที่รันจริง (__dirname เช่น /app ตอนอยู่ใน Docker) เอาไว้แปลงกลับเป็น "backend/..."
+// ให้อ่านง่ายขึ้นตอนแสดงผล เพราะ path จริงในคอนเทนเนอร์ไม่มีความหมายอะไรกับคนอ่านนอก Docker
+const APP_ROOT = path.resolve(__dirname);
+
+// แปลง path จริง (ข้างในคอนเทนเนอร์/เครื่องที่รัน) ให้เป็น path แบบที่คนดูจากฝั่ง host จะคุ้นตา
+// ใช้ mapping ที่เรากำหนดเองเท่านั้น (docker-compose.yml + __dirname) จึงมั่นใจได้ว่าถูกต้องจริง ไม่ใช่การเดา
+function toDisplayPath(p) {
+  if (!p) return p;
+  const resolved = path.resolve(p);
+
+  for (const m of listMountedHostDrives()) {
+    const mountRoot = path.resolve(m.path);
+    if (resolved === mountRoot || resolved.startsWith(mountRoot + path.sep)) {
+      const rest = resolved.slice(mountRoot.length).replace(/\//g, '\\');
+      return `${m.name}${rest || '\\'}`;
+    }
+  }
+
+  if (resolved === APP_ROOT || resolved.startsWith(APP_ROOT + path.sep)) {
+    const rest = resolved.slice(APP_ROOT.length).replace(/\\/g, '/');
+    return `backend${rest}`;
+  }
+
+  return resolved;
+}
+
 // ถ้าไม่ส่งหรือส่งค่าว่าง จะคืนรายชื่อไดรฟ์ทั้งหมดให้เลือกก่อน
 app.get('/api/fs/browse', (req, res) => {
   const platform = os.platform();
@@ -676,7 +728,11 @@ app.get('/api/fs/browse', (req, res) => {
       if (platform === 'win32') {
         return res.json({ success: true, path: '', parent: null, isRoot: true, folders: listWindowsDrives() });
       }
-      targetPath = '/'; // Linux/Mac ไม่มีแนวคิดไดรฟ์ ให้เริ่มที่ root
+      const hostDrives = listMountedHostDrives();
+      if (hostDrives.length > 0) {
+        return res.json({ success: true, path: '', parent: null, isRoot: true, folders: hostDrives });
+      }
+      targetPath = '/'; // ไม่มีไดรฟ์ host mount เข้ามาเลย ให้เริ่มที่ root ของ container แทน
     }
 
     const resolved = path.resolve(targetPath);
@@ -714,6 +770,8 @@ app.get('/api/fs/browse', (req, res) => {
     let parent;
     if (platform === 'win32' && isWindowsDriveRoot(resolved)) {
       parent = ''; // ย้อนกลับ = กลับไปหน้าเลือกไดรฟ์
+    } else if (platform !== 'win32' && isHostDriveMountRoot(resolved)) {
+      parent = ''; // ย้อนกลับ = กลับไปหน้าเลือกไดรฟ์ host ที่ mount ไว้
     } else {
       const up = path.dirname(resolved);
       parent = up === resolved ? null : up;

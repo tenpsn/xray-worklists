@@ -8,6 +8,14 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      # mount ไดรฟ์ host เข้ามาให้ folder picker ในหน้า Settings เห็นและเลือกได้
+      # (ต้อง restart container ทุกครั้งที่ต้องการให้เห็นไดรฟ์ใหม่ เช่น USB ที่เสียบทีหลัง)
+      - type: bind
+        source: C:\
+        target: /mnt/hostC
+      - type: bind
+        source: D:\
+        target: /mnt/hostD
     mem_limit: 300m
     restart: unless-stopped
 
