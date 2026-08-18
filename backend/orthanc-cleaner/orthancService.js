@@ -1,12 +1,3 @@
-const fs = require('fs');
-const path = require('path');
-
-const BACKUP_DIR = path.join(__dirname, 'data', 'orthanc-backups');
-
-function sanitizeFilePart(value) {
-  return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '_') || 'unknown';
-}
-
 function buildAuthHeader(username, password) {
   if (!username && !password) return null;
   const token = Buffer.from(`${username || ''}:${password || ''}`).toString('base64');
@@ -80,43 +71,15 @@ async function deleteStudyById(orthancUrl, authHeader, id) {
   }
 }
 
-// ดาวน์โหลด study เป็น ZIP จาก Orthanc มาเก็บไว้ในเครื่อง backend ก่อนลบจริง
-async function backupStudy(orthancUrl, authHeader, item) {
-  const res = await orthancFetch(orthancUrl, authHeader, `/studies/${encodeURIComponent(item.id)}/archive`, {
-    method: 'GET',
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`สำรองข้อมูลไม่สำเร็จ (${res.status}): ${text || res.statusText}`);
-  }
-
-  const fileName = [
-    sanitizeFilePart(item.studyDate),
-    sanitizeFilePart(item.patientId),
-    sanitizeFilePart(item.accessionNumber),
-    sanitizeFilePart(item.id).slice(0, 8),
-  ].join('_') + '.zip';
-
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const filePath = path.join(BACKUP_DIR, fileName);
-  const buffer = Buffer.from(await res.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
-}
-
-async function deleteStudies(orthancUrl, username, password, items, backup) {
+async function deleteStudies(orthancUrl, username, password, items) {
   const normalizedUrl = normalizeOrthancUrl(orthancUrl);
   const authHeader = buildAuthHeader(username, password);
 
   const results = [];
   for (const item of items) {
     try {
-      let backupPath = null;
-      if (backup) {
-        backupPath = await backupStudy(normalizedUrl, authHeader, item);
-      }
       await deleteStudyById(normalizedUrl, authHeader, item.id);
-      results.push({ id: item.id, success: true, backupPath });
+      results.push({ id: item.id, success: true });
     } catch (err) {
       const message = err.message === 'fetch failed'
         ? 'เชื่อมต่อ Orthanc ไม่ได้'

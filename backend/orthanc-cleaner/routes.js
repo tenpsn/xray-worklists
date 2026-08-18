@@ -20,12 +20,12 @@ router.post('/find', async (req, res) => {
 });
 
 router.post('/delete', async (req, res) => {
-  const { orthancUrl, username, password, items, backup } = req.body;
+  const { orthancUrl, username, password, items } = req.body;
   if (!orthancUrl || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ success: false, message: 'ไม่มีรายการให้ลบ' });
   }
   try {
-    const results = await orthancService.deleteStudies(orthancUrl, username, password, items, backup);
+    const results = await orthancService.deleteStudies(orthancUrl, username, password, items);
     const failed = results.filter((r) => !r.success);
     res.json({ success: failed.length === 0, results });
   } catch (err) {

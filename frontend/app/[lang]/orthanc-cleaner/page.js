@@ -27,7 +27,6 @@ export default function OrthancCleanerPage() {
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
-  const [backup, setBackup] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
   function toggleSelected(id) {
@@ -78,7 +77,6 @@ export default function OrthancCleanerPage() {
   function openConfirm() {
     if (selectedIds.size === 0) return;
     setConfirmText('');
-    setBackup(true);
     setConfirmOpen(true);
   }
 
@@ -86,16 +84,13 @@ export default function OrthancCleanerPage() {
     const items = studies.filter((s) => selectedIds.has(s.id));
     setConfirmOpen(false);
     setDeleting(true);
-    setDeleteStatus({
-      text: backup ? dict.backingUpText(items.length) : dict.deletingText(items.length),
-      type: 'info',
-    });
+    setDeleteStatus({ text: dict.deletingText(items.length), type: 'info' });
 
     try {
       const res = await fetch(`${API_URL}/api/orthanc/delete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orthancUrl, username, password, items, backup }),
+        body: JSON.stringify({ orthancUrl, username, password, items }),
       });
       const data = await res.json();
       const results = data.results || [];
@@ -107,12 +102,11 @@ export default function OrthancCleanerPage() {
       setSelectedIds(new Set());
       setSearchStatus({ text: '', type: 'info' });
 
-      const backupNote = backup ? dict.backupNoteText(succeeded.length) : '';
       if (failed.length === 0) {
-        setDeleteStatus({ text: dict.deleteAllSuccessText(items.length, backupNote), type: 'success' });
+        setDeleteStatus({ text: dict.deleteAllSuccessText(items.length), type: 'success' });
       } else {
         setDeleteStatus({
-          text: dict.partialSuccessText(succeeded.length, failed.length, backupNote, failed.map((f) => f.message).join(', ')),
+          text: dict.partialSuccessText(succeeded.length, failed.length, failed.map((f) => f.message).join(', ')),
           type: 'error',
         });
       }
@@ -230,10 +224,6 @@ export default function OrthancCleanerPage() {
             </div>
             <div className="modal-body" style={{ padding: '16px' }}>
               <p>{dict.confirmBodyText(selectedIds.size)}</p>
-              <label className="checkbox-inline" style={{ margin: '14px 0' }}>
-                <input type="checkbox" checked={backup} onChange={(e) => setBackup(e.target.checked)} />
-                {dict.backupCheckboxLabel}
-              </label>
               <p>{dict.typeDeleteLabel}</p>
               <input
                 type="text"
