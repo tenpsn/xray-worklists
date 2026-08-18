@@ -41,7 +41,7 @@ function maskSecrets(value) {
 // อนุญาตให้ frontend (คนละ port/โดเมน) เรียกเข้ามาได้
 app.use(cors({ origin: CORS_ORIGIN }));
 
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 
 // โหลดการตั้งค่า (HIS MWL)
 let currentSettings = settingsService.loadSettings();

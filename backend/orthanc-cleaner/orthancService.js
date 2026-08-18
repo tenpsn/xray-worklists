@@ -71,23 +71,44 @@ async function deleteStudyById(orthancUrl, authHeader, id) {
   }
 }
 
-async function deleteStudies(orthancUrl, username, password, items) {
+const DELETE_MAX_ATTEMPTS = 3;
+const DELETE_RETRY_DELAY_MS = 500;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// รันลบทีละตัวเบื้องหลัง พร้อมอัปเดต job ให้ endpoint สถานะ poll อ่านได้ระหว่างทาง
+async function runDeleteJob(job, orthancUrl, username, password, items) {
   const normalizedUrl = normalizeOrthancUrl(orthancUrl);
   const authHeader = buildAuthHeader(username, password);
 
-  const results = [];
   for (const item of items) {
-    try {
-      await deleteStudyById(normalizedUrl, authHeader, item.id);
-      results.push({ id: item.id, success: true });
-    } catch (err) {
-      const message = err.message === 'fetch failed'
-        ? 'เชื่อมต่อ Orthanc ไม่ได้'
-        : err.message;
-      results.push({ id: item.id, success: false, message });
+    let lastErr;
+    for (let attempt = 1; attempt <= DELETE_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        await deleteStudyById(normalizedUrl, authHeader, item.id);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        // "fetch failed" คือหลุดการเชื่อมต่อชั่วคราว (ไม่ใช่ Orthanc ตอบปฏิเสธ) ลองใหม่ได้
+        if (err.message !== 'fetch failed' || attempt === DELETE_MAX_ATTEMPTS) break;
+        await sleep(DELETE_RETRY_DELAY_MS);
+      }
     }
+
+    if (lastErr) {
+      const message = lastErr.message === 'fetch failed'
+        ? 'เชื่อมต่อ Orthanc ไม่ได้'
+        : lastErr.message;
+      job.results.push({ id: item.id, success: false, message });
+    } else {
+      job.results.push({ id: item.id, success: true });
+    }
+    job.processed += 1;
   }
-  return results;
+  job.done = true;
 }
 
-module.exports = { findStudies, deleteStudies };
+module.exports = { findStudies, runDeleteJob };

@@ -80,6 +80,22 @@ export default function OrthancCleanerPage() {
     setConfirmOpen(true);
   }
 
+  async function pollDeleteJob(jobId, total) {
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const res = await fetch(`${API_URL}/api/orthanc/delete/status/${jobId}`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || dict.deleteConnectionError);
+
+      setDeleteStatus({ text: dict.deletingProgressText(data.processed, total), type: 'info' });
+
+      if (data.done) {
+        if (data.error) throw new Error(data.error);
+        return data.results;
+      }
+    }
+  }
+
   async function handleConfirmDelete() {
     const items = studies.filter((s) => selectedIds.has(s.id));
     setConfirmOpen(false);
@@ -87,13 +103,15 @@ export default function OrthancCleanerPage() {
     setDeleteStatus({ text: dict.deletingText(items.length), type: 'info' });
 
     try {
-      const res = await fetch(`${API_URL}/api/orthanc/delete`, {
+      const startRes = await fetch(`${API_URL}/api/orthanc/delete/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orthancUrl, username, password, items }),
+        body: JSON.stringify({ orthancUrl, username, password, items: items.map((s) => ({ id: s.id })) }),
       });
-      const data = await res.json();
-      const results = data.results || [];
+      const startData = await startRes.json();
+      if (!startData.success) throw new Error(startData.message || dict.deleteConnectionError);
+
+      const results = await pollDeleteJob(startData.jobId, startData.total);
       const succeeded = results.filter((r) => r.success);
       const failed = results.filter((r) => !r.success);
 

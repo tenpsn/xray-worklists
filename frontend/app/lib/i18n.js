@@ -129,6 +129,7 @@ const dictionaries = {
       },
       deleteSelectedButton: (n) => `Delete selected (${n})`,
       deletingText: (n) => `Deleting ${n} cases...`,
+      deletingProgressText: (done, total) => `Deleting ${done}/${total} cases...`,
       deleteAllSuccessText: (n) => `Successfully deleted all ${n} cases`,
       partialSuccessText: (ok, failed, msgs) =>
         `Deleted ${ok} cases, failed ${failed} cases: ${msgs}`,
@@ -271,6 +272,7 @@ const dictionaries = {
       },
       deleteSelectedButton: (n) => `ลบรายการที่เลือก (${n})`,
       deletingText: (n) => `กำลังลบ ${n} เคส...`,
+      deletingProgressText: (done, total) => `กำลังลบ ${done}/${total} เคส...`,
       deleteAllSuccessText: (n) => `ลบสำเร็จทั้งหมด ${n} เคส`,
       partialSuccessText: (ok, failed, msgs) =>
         `ลบสำเร็จ ${ok} เคส, ล้มเหลว ${failed} เคส: ${msgs}`,
