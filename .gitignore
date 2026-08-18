@@ -1,11 +1,9 @@
 node_modules
 .env
-.env.local
 
-backend/data/
+backend/logs/
 backend/worklists/
 backend/mpps-state.json
-backend/logs/
 backend/settings.json
 
 frontend/.next/

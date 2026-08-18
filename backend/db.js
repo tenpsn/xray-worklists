@@ -145,43 +145,43 @@ function getType() {
   return currentType;
 }
 
-// แปลง error
-function friendlyErrorMessage(err) {
+// แปลง error เป็น code กลาง (ไม่ผูกภาษา) ให้ฝั่ง frontend ไป map เป็นข้อความ EN/TH เอง
+function friendlyErrorCode(err) {
   const code = err.code;
 
   switch (code) {
     case 'ENOTFOUND':
-      return `ไม่เจอ Hostname "${err.hostname || ''}" กรุณาตรวจสอบ IP Address`;
+      return { errorCode: 'HOST_NOT_FOUND', errorParams: { hostname: err.hostname || '' } };
     case 'ECONNREFUSED':
-      return 'เชื่อมต่อฐานข้อมูลไม่ติด กรุณาตรวจสอบ Port';
+      return { errorCode: 'CONN_REFUSED' };
     case 'ETIMEDOUT':
     case 'ETIMEOUT':
-      return 'หมดเวลาเชื่อมต่อฐานข้อมูล กรุณาตรวจสอบ IP Address / Port';
+      return { errorCode: 'TIMEOUT' };
 
     // Postgres
     case '28P01':
-      return 'Username หรือ Password ไม่ถูกต้อง (Postgres)';
+      return { errorCode: 'PG_AUTH' };
     case '28000':
-      return 'ไม่พบ Username นี้ หรือไม่มีสิทธิ์เข้าถึง (Postgres)';
+      return { errorCode: 'PG_NO_ACCESS' };
     case '3D000':
-      return 'ไม่พบฐานข้อมูลชื่อนี้ กรุณาตรวจสอบชื่อ Database (Postgres)';
+      return { errorCode: 'PG_DB_NOT_FOUND' };
 
     // MySQL
     case 'ER_ACCESS_DENIED_ERROR':
-      return 'Username หรือ Password ไม่ถูกต้อง (MySQL)';
+      return { errorCode: 'MYSQL_AUTH' };
     case 'ER_BAD_DB_ERROR':
-      return 'ไม่พบฐานข้อมูลชื่อนี้ กรุณาตรวจสอบชื่อ Database (MySQL)';
+      return { errorCode: 'MYSQL_DB_NOT_FOUND' };
     case 'ER_DBACCESS_DENIED_ERROR':
-      return 'Username นี้ไม่มีสิทธิ์เข้าถึงฐานข้อมูลนี้ (MySQL)';
-      
+      return { errorCode: 'MYSQL_NO_ACCESS' };
+
     // MSSQL
     case 'ELOGIN':
-      return 'Username หรือ Password ไม่ถูกต้อง (MS SQL)';
+      return { errorCode: 'MSSQL_AUTH' };
     case 'ESOCKET':
-      return 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้ (โปรดตรวจสอบ IP Address/Port)';
+      return { errorCode: 'MSSQL_SOCKET' };
 
     default:
-      return err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล';
+      return { errorCode: 'UNKNOWN', errorParams: { message: err.message || '' } };
   }
 }
 
@@ -260,10 +260,10 @@ async function detectHisSystem(his) {
   }
 }
 
-module.exports = { 
-  initPool, 
-  query, 
-  getType, 
-  friendlyErrorMessage,
+module.exports = {
+  initPool,
+  query,
+  getType,
+  friendlyErrorCode,
   detectHisSystem,
 };

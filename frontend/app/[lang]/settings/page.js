@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { getDictionary } from '../../lib/i18n';
+import { getDictionary, formatDbError } from '../../lib/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -32,8 +32,9 @@ const DEFAULT_FORM = {
 export default function SettingsPage() {
   const { lang: rawLang } = useParams();
   const lang = rawLang === 'th' ? 'th' : 'en';
-  const dict = getDictionary(lang).settings;
-  const nav = getDictionary(lang).nav;
+  const fullDict = getDictionary(lang);
+  const dict = fullDict.settings;
+  const nav = fullDict.nav;
 
   const [form, setForm] = useState(DEFAULT_FORM);
   const [status, setStatus] = useState(dict.statusLoading);
@@ -175,7 +176,7 @@ export default function SettingsPage() {
       if (json.success && json.detected) {
         updateHisSystem(json.detected);
       }
-      setStatus(json.message);
+      setStatus(json.errorCode ? dict.detectFailedPrefix + formatDbError(fullDict, json.errorCode, json.errorParams) : json.message);
       setStatusType(json.success && json.detected ? 'success' : 'error');
     } catch (err) {
       setStatus(dict.connectErrorPrefix + err.message);
@@ -204,7 +205,11 @@ export default function SettingsPage() {
       });
       const json = await res.json();
       setWorklistDirActive(json.worklistDirActive || '');
-      setStatus(json.message);
+      if (json.savedButDbFailed) {
+        setStatus(dict.savedButDbFailedPrefix + formatDbError(fullDict, json.errorCode, json.errorParams) + (json.warningText || ''));
+      } else {
+        setStatus(json.message);
+      }
       setStatusType(json.success ? 'success' : 'error');
     } catch (err) {
       setStatus(dict.connectErrorPrefix + err.message);

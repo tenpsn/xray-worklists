@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatNameField, formatPrefixField, formatDoctorField } from '../../lib/nameDisplay';
-import { getDictionary } from '../../lib/i18n';
+import { getDictionary, formatDbError } from '../../lib/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -15,11 +15,12 @@ export default function Page() {
   const dict = fullDict.worklists;
   const nav = fullDict.nav;
 
-  // อ่านค่า filter ที่บันทึกไว้จาก localStorage เพราะสลับภาษาแล้วหน้านี้ remount ใหม่ ค่าจากหน้าเว็บก่อนหน้าจะหายถ้าไม่เก็บไว้
+  // อ่านค่า filter ที่บันทึกไว้จาก sessionStorage เพราะสลับภาษาแล้วหน้านี้ remount ใหม่ ค่าจากหน้าเว็บก่อนหน้าจะหายถ้าไม่เก็บไว้
+  // ใช้ sessionStorage ไม่ใช่ localStorage เพื่อให้เปิด tab/session ใหม่แล้วเริ่มที่ค่า default เสมอ
   function loadSavedFilters() {
     if (typeof window === 'undefined') return { dateback: 1, include: '', exclude: '', confirm: false };
     try {
-      const saved = JSON.parse(window.localStorage.getItem('worklistFilters'));
+      const saved = JSON.parse(window.sessionStorage.getItem('worklistFilters'));
       return {
         dateback: Number(saved?.dateback) > 0 ? Number(saved.dateback) : 1,
         include: saved?.include || '',
@@ -108,7 +109,15 @@ export default function Page() {
       const json = await res.json();
 
       if (!json.success) {
-        setStatus(dict.statusErrorPrefix + json.message);
+        if (json.errorCode === 'BUSY') {
+          setStatus(dict.statusBusy);
+        } else if (json.errorCode === 'DB_NOT_CONFIGURED') {
+          setStatus(dict.statusErrorPrefix + dict.errorDbNotConfigured);
+        } else if (json.errorCode) {
+          setStatus(dict.statusErrorPrefix + formatDbError(fullDict, json.errorCode, json.errorParams));
+        } else {
+          setStatus(dict.statusErrorPrefix + json.message);
+        }
         return;
       }
 
@@ -169,7 +178,7 @@ export default function Page() {
   // เซฟค่าที่พิมพ์ไว้ตลอด แม้ยังไม่กด Search กันหายตอนสลับภาษา (หน้านี้ remount ใหม่ทุกครั้งที่เปลี่ยน lang)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem('worklistFilters', JSON.stringify({ dateback, include, exclude, confirm }));
+    window.sessionStorage.setItem('worklistFilters', JSON.stringify({ dateback, include, exclude, confirm }));
   }, [dateback, include, exclude, confirm]);
 
   const loadDataRef = useRef(loadData);

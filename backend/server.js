@@ -76,15 +76,20 @@ async function applySettings(settings, options = {}) {
   }
 
   // 2. MPPS server
-  try {
-    await Mppsservice.startMppsServer(settings.mwl.mppsPort || 7001, handleMppsStatusChange);
-  } catch (err) {
-    if (exitOnMppsFailure) {
-      console.error('[Server] ---> เริ่ม MPPS server ไม่สำเร็จตอนสตาร์ท ปิดโปรแกรม:', err.message);
-      process.exit(1);
+  if (settings.mwl.mppsPort) {
+    try {
+      await Mppsservice.startMppsServer(settings.mwl.mppsPort, handleMppsStatusChange);
+    } catch (err) {
+      if (exitOnMppsFailure) {
+        console.error('[Server] ---> เริ่ม MPPS server ไม่สำเร็จตอนสตาร์ท ปิดโปรแกรม:', err.message);
+        process.exit(1);
+      }
+      console.error('[Settings] ---> เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ:', err.message);
+      warnings.push(`เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ - ${err.message} ระบบจะยังไม่รับสถานะ MPPS จากเครื่อง Modality จนกว่าจะแก้ port ให้ถูกต้อง`);
     }
-    console.error('[Settings] ---> เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ:', err.message);
-    warnings.push(`เริ่ม MPPS server ที่พอร์ตใหม่ไม่สำเร็จ - ${err.message} ระบบจะยังไม่รับสถานะ MPPS จากเครื่อง Modality จนกว่าจะแก้ port ให้ถูกต้อง`);
+  } else {
+    Mppsservice.stopMppsServer();
+    console.log('[Server] ---> ยังไม่ได้ตั้งค่า MPPS Port รอการตั้งค่าจากหน้าเว็บ');
   }
 
   // 3. เชื่อมต่อฐานข้อมูล HIS
@@ -397,7 +402,7 @@ app.get('/health', async (req, res) => {
     await db.query('SELECT 1');
     res.json({ ok: true, db: 'connected' });
   } catch (err) {
-    res.status(503).json({ ok: false, db: 'disconnected', error: db.friendlyErrorMessage(err) });
+    res.status(503).json({ ok: false, db: 'disconnected', ...db.friendlyErrorCode(err) });
   }
 });
 
@@ -457,7 +462,7 @@ app.post('/api/settings/detect-his-system', async (req, res) => {
     console.error('[Settings] ---> ตรวจสอบระบบ HIS ไม่สำเร็จ:', err.message);
     res.json({
       success: false,
-      message: `ตรวจสอบไม่สำเร็จ: ${db.friendlyErrorMessage(err)}`,
+      ...db.friendlyErrorCode(err),
       error: err.message,
     });
   }
@@ -496,12 +501,13 @@ app.post('/api/settings', async (req, res) => {
       });
     }
 
-    const friendlyMessage = db.friendlyErrorMessage(dbError);
     return res.json({
       success: false,
       settings: maskSecrets(currentSettings),
       worklistDirActive: toDisplayPath(dicomService.getWorklistDir()),
-      message: `บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${friendlyMessage}${warningText}`,
+      savedButDbFailed: true,
+      warningText,
+      ...db.friendlyErrorCode(dbError),
       error: dbError.message,
     });
   } catch (err) {
@@ -630,20 +636,21 @@ function startAutoWorklistLoop() {
 }
 
 app.post('/api/xray-report', async (req, res) => {
+  const displayLang = req.body?.lang === 'th' ? 'th' : 'en';
+
   if (isProcessingXrayReport) {
-    return res.status(429).json({ success: false, message: 'กำลังประมวลผลรอบก่อนหน้าอยู่ กรุณาลองใหม่อีกครั้ง' });
+    return res.status(429).json({ success: false, errorCode: 'BUSY' });
   }
 
   const hisConfig = currentSettings.his || {};
   if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
-    return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่าการเชื่อมต่อฐานข้อมูล กรุณาไปที่เมนูตั้งค่าระบบ' });
+    return res.status(400).json({ success: false, errorCode: 'DB_NOT_CONFIGURED' });
   }
 
   isProcessingXrayReport = true;
   try {
-    const { dateback = 1, include, exclude, confirm, lang, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
+    const { dateback = 1, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
     const confirmFlag = confirm === true || confirm === 'true' || confirm === '1';
-    const displayLang = lang === 'th' ? 'th' : 'en';
 
     const { sql, params } = buildXrayReportQuery(
       dateback, include, exclude, confirmFlag,
@@ -671,8 +678,7 @@ app.post('/api/xray-report', async (req, res) => {
 
   } catch (err) {
     console.error('Query error:', err);
-    const friendlyMessage = db.friendlyErrorMessage(err);
-    res.status(500).json({ success: false, message: friendlyMessage });
+    res.status(500).json({ success: false, ...db.friendlyErrorCode(err) });
   } finally {
     isProcessingXrayReport = false;
   }

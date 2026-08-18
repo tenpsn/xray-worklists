@@ -1,5 +1,19 @@
 const dictionaries = {
   en: {
+    dbErrors: {
+      HOST_NOT_FOUND: ({ hostname }) => `Hostname "${hostname}" not found. Please check the IP Address.`,
+      CONN_REFUSED: 'Cannot connect to the database. Please check the Port.',
+      TIMEOUT: 'Database connection timed out. Please check the IP Address / Port.',
+      PG_AUTH: 'Incorrect Username or Password (Postgres).',
+      PG_NO_ACCESS: 'Username not found or no access permission (Postgres).',
+      PG_DB_NOT_FOUND: 'Database not found. Please check the Database name (Postgres).',
+      MYSQL_AUTH: 'Incorrect Username or Password (MySQL).',
+      MYSQL_DB_NOT_FOUND: 'Database not found. Please check the Database name (MySQL).',
+      MYSQL_NO_ACCESS: 'This Username does not have access to this database (MySQL).',
+      MSSQL_AUTH: 'Incorrect Username or Password (MS SQL).',
+      MSSQL_SOCKET: 'Cannot connect to the database (please check IP Address/Port).',
+      UNKNOWN: ({ message }) => message || 'An error occurred while connecting to the database.',
+    },
     nav: {
       selectSystem: 'Select System',
       settingsLink: 'System Settings',
@@ -26,6 +40,7 @@ const dictionaries = {
       statusBusy: 'Previous request still processing. Please wait and try again...',
       statusErrorPrefix: 'Error: ',
       statusConnectErrorPrefix: 'Cannot connect to server: ',
+      errorDbNotConfigured: 'Database connection is not configured yet. Please go to the Settings menu.',
       statusSummary: ({ total, newCount, updateCount }) =>
         `Showing ${total} records (New: ${newCount} | Updated: ${updateCount})`,
       table: {
@@ -85,6 +100,8 @@ const dictionaries = {
       savingStatus: 'Saving and testing connection...',
       browseFailedError: 'Failed to open this folder',
       createFolderFailedError: 'Failed to create folder',
+      detectFailedPrefix: 'Check failed: ',
+      savedButDbFailedPrefix: 'Settings saved, but database connection failed: ',
       modal: {
         title: 'Choose Worklist folder',
         selectDriveLabel: 'Select drive',
@@ -136,6 +153,20 @@ const dictionaries = {
     },
   },
   th: {
+    dbErrors: {
+      HOST_NOT_FOUND: ({ hostname }) => `ไม่เจอ Hostname "${hostname}" กรุณาตรวจสอบ IP Address`,
+      CONN_REFUSED: 'เชื่อมต่อฐานข้อมูลไม่ติด กรุณาตรวจสอบ Port',
+      TIMEOUT: 'หมดเวลาเชื่อมต่อฐานข้อมูล กรุณาตรวจสอบ IP Address / Port',
+      PG_AUTH: 'Username หรือ Password ไม่ถูกต้อง (Postgres)',
+      PG_NO_ACCESS: 'ไม่พบ Username นี้ หรือไม่มีสิทธิ์เข้าถึง (Postgres)',
+      PG_DB_NOT_FOUND: 'ไม่พบฐานข้อมูลชื่อนี้ กรุณาตรวจสอบชื่อ Database (Postgres)',
+      MYSQL_AUTH: 'Username หรือ Password ไม่ถูกต้อง (MySQL)',
+      MYSQL_DB_NOT_FOUND: 'ไม่พบฐานข้อมูลชื่อนี้ กรุณาตรวจสอบชื่อ Database (MySQL)',
+      MYSQL_NO_ACCESS: 'Username นี้ไม่มีสิทธิ์เข้าถึงฐานข้อมูลนี้ (MySQL)',
+      MSSQL_AUTH: 'Username หรือ Password ไม่ถูกต้อง (MS SQL)',
+      MSSQL_SOCKET: 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้ (โปรดตรวจสอบ IP Address/Port)',
+      UNKNOWN: ({ message }) => message || 'เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล',
+    },
     nav: {
       selectSystem: 'เลือกระบบ',
       settingsLink: 'ตั้งค่าระบบ',
@@ -162,6 +193,7 @@ const dictionaries = {
       statusBusy: 'กำลังประมวลผลรอบก่อนหน้าอยู่ กรุณารอสักครู่แล้วลองใหม่...',
       statusErrorPrefix: 'เกิดข้อผิดพลาด: ',
       statusConnectErrorPrefix: 'เชื่อมต่อ server ไม่ได้: ',
+      errorDbNotConfigured: 'ยังไม่ได้ตั้งค่าการเชื่อมต่อฐานข้อมูล กรุณาไปที่เมนูตั้งค่าระบบ',
       statusSummary: ({ total, newCount, updateCount }) =>
         `แสดงข้อมูลรวม ${total} รายการ (พบใหม่: ${newCount} | อัปเดต: ${updateCount})`,
       table: {
@@ -221,6 +253,8 @@ const dictionaries = {
       savingStatus: 'กำลังบันทึกและทดสอบการเชื่อมต่อ...',
       browseFailedError: 'เปิดโฟลเดอร์นี้ไม่สำเร็จ',
       createFolderFailedError: 'สร้างโฟลเดอร์ไม่สำเร็จ',
+      detectFailedPrefix: 'ตรวจสอบไม่สำเร็จ: ',
+      savedButDbFailedPrefix: 'บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ',
       modal: {
         title: 'เลือกโฟลเดอร์เก็บไฟล์ Worklist',
         selectDriveLabel: 'เลือกไดรฟ์',
@@ -276,4 +310,10 @@ const dictionaries = {
 export function getDictionary(lang) {
   const l = lang === 'th' ? 'th' : 'en';
   return dictionaries[l];
+}
+
+// รวม errorCode จาก backend + params ให้เป็นข้อความตามภาษา UI
+export function formatDbError(fullDict, errorCode, params) {
+  const entry = fullDict.dbErrors[errorCode] || fullDict.dbErrors.UNKNOWN;
+  return typeof entry === 'function' ? entry(params || {}) : entry;
 }
