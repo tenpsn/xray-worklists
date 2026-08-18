@@ -11,7 +11,12 @@
 
 แทนที่เจ้าหน้าที่ต้องพิมพ์ชื่อ-นามสกุลคนไข้ที่หน้าเครื่องเองทุกครั้ง ระบบนี้จะดึงข้อมูลจาก HIS มาส่งให้เครื่องอัตโนมัติ
 
-**สิ่งที่เว็บทำได้:**
+เปิดเว็บขึ้นมาจะเจอหน้าเลือกระบบก่อน มี 2 ระบบย่อยให้เลือก:
+
+1. **X-ray Report (Worklists)** — ตัวหลักตามที่อธิบายไว้ข้างบน
+2. **Case Cleaner** — หน้าค้นหา/ลบเคส (Study) ใน Orthanc ตามช่วงวันที่ตรวจ ใช้เคลียร์เคสเก่าที่ค้างอยู่ในเครื่อง Orthanc
+
+**สิ่งที่เว็บทำได้ (ฝั่ง X-ray Report):**
 
 - โชว์ตารางรายชื่อคนไข้ที่ถูกส่งตรวจ X-ray หน้าจอรีเฟรชเองทุก 10 วินาที
 - กรอง/ค้นหาได้ เช่น ดูย้อนหลังกี่วัน, ดูเฉพาะรายการที่ยังไม่ยืนยันผล, ค้นหาชื่อรายการตรวจ
@@ -272,8 +277,13 @@ docker compose down --rmi all
 
 **Frontend**
 
-- **`app/page.js`** — หน้าหลัก แสดงตาราง X-ray, กรอง/ค้นหาได้, auto-refresh ทุก 10 วิ, สลับภาษาไทย/อังกฤษ
-- **`app/settings/page.js`** — หน้าตั้งค่า HIS DB (host, port, username, password, encoding) และ MWL (AE Title, port)
+โครงสร้าง route ใช้ `[lang]` (`th`/`en`) คุมภาษา หน้าเดิมที่ root (`app/page.js`, `app/settings/page.js`, `app/worklists/page.js`, `app/orthanc-cleaner/page.js`) ตอนนี้เหลือแค่ redirect ไป `/en/...` ให้เผื่อมีลิงก์เก่า โค้ดจริงย้ายไปอยู่ใต้ `app/[lang]/` ทั้งหมด
+
+- **`app/[lang]/page.js`** — หน้าเลือกระบบ (X-ray Report / Case Cleaner)
+- **`app/[lang]/worklists/page.js`** — หน้าหลัก แสดงตาราง X-ray, กรอง/ค้นหาได้, auto-refresh ทุก 10 วิ
+- **`app/[lang]/settings/page.js`** — หน้าตั้งค่า HIS DB (host, port, username, password, encoding) และ MWL (AE Title, port)
+- **`app/[lang]/orthanc-cleaner/page.js`** — หน้า Case Cleaner ค้นหา/ลบเคสใน Orthanc ตามช่วงวันที่ตรวจ
+- **`app/lib/i18n.js`** — dictionary คำแปลไทย/อังกฤษของทุกหน้า, มี `getDictionary(lang)` ให้แต่ละหน้าดึงไปใช้
 - **`app/lib/nameDisplay.js`** — จัดรูปแบบชื่อ-นามสกุลที่แสดงในตาราง ตัดความยาว, แปลงเป็นคาราโอเกะเมื่อเลือกอังกฤษ
 
 ### เลือกโฟลเดอร์เก็บไฟล์ Worklist
