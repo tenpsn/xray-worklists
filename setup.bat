@@ -28,17 +28,45 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo -- IP ของเครื่องนี้ในวง LAN --
+echo   ถ้าจะให้เครื่องอื่น ^(เช่นเครื่องหน้า X-ray, เครื่องอื่นในคลินิก^) เปิดเว็บนี้ได้ ต้องกรอก IP ของเครื่องนี้
+echo   ดู IP ได้จากคำสั่ง ipconfig ^(หา IPv4 Address^)
+echo   ถ้าจะใช้แค่เครื่องนี้เครื่องเดียว กด Enter เว้นว่างไว้ได้ ^(จะใช้ localhost^)
+set /p "LAN_IP=  กรอก IP (เว้นว่าง = localhost): "
+
+if defined LAN_IP (
+    echo   ใช้ IP: %LAN_IP%
+) else (
+    echo   ใช้ localhost
+)
+
 echo -- เตรียมไฟล์ .env --
 
 if not exist ".env" (
     copy /y ".env.example" ".env" >nul
-    echo   สร้าง .env จาก .env.example แล้ว ^(ใช้ค่า default^)
+    rem PROJECT_HOST_PATH ใน .env.example เป็นแค่ค่าตัวอย่าง ต้องแทนที่ด้วย path จริงที่วางโปรเจกต์นี้ไว้
+    rem (ใช้แปลง path โฟลเดอร์ worklist default ให้ Orthanc ตอน sync อัตโนมัติ ถ้าไม่ตรงจะ sync ผิดโฟลเดอร์)
+    powershell -NoProfile -Command "(Get-Content '.env') -replace 'PROJECT_HOST_PATH=.*', 'PROJECT_HOST_PATH=%CD%' | Set-Content '.env'"
+    if defined LAN_IP (
+        rem ตั้ง NEXT_PUBLIC_API_URL เป็น IP วง LAN แทน localhost เพื่อให้เครื่องอื่นเปิดเว็บแล้วเรียก backend ได้จริง
+        powershell -NoProfile -Command "(Get-Content '.env') -replace 'NEXT_PUBLIC_API_URL=.*', 'NEXT_PUBLIC_API_URL=http://%LAN_IP%:4000' | Set-Content '.env'"
+    )
+    echo   สร้าง .env จาก .env.example แล้ว ^(ใช้ค่า default, ตั้ง PROJECT_HOST_PATH เป็น %CD% ให้อัตโนมัติ^)
 ) else (
     echo   .env มีอยู่แล้ว ข้าม
 )
 
+if not exist "orthanc-data" (
+    mkdir "orthanc-data"
+    echo   สร้างโฟลเดอร์ orthanc-data แล้ว ^(เก็บข้อมูล Orthanc^)
+)
+
 if not exist "backend\.env" (
     copy /y "backend\.env.example" "backend\.env" >nul
+    if defined LAN_IP (
+        rem ตั้ง CORS_ORIGIN ให้ตรงกับ origin ที่เครื่องอื่นในวง LAN จะเปิดเว็บเข้ามา ไม่งั้น backend จะ block request
+        powershell -NoProfile -Command "(Get-Content 'backend\.env') -replace 'CORS_ORIGIN=.*', 'CORS_ORIGIN=http://%LAN_IP%:3000' | Set-Content 'backend\.env'"
+    )
     echo   สร้าง backend\.env จาก backend\.env.example แล้ว ^(ใช้ค่า default^)
 ) else (
     echo   backend\.env มีอยู่แล้ว ข้าม
@@ -65,10 +93,13 @@ docker compose ps
 
 echo.
 echo เสร็จแล้ว!
-echo   เปิดเว็บ:        http://localhost:3000
+echo   เปิดเว็บ ^(เครื่องนี้^):         http://localhost:3000
+if defined LAN_IP echo   เปิดเว็บ ^(เครื่องอื่นในวง LAN^): http://%LAN_IP%:3000
 echo   ไปตั้งค่าฐานข้อมูล HIS ต่อได้ที่หน้า Settings ในเว็บ
+echo   Orthanc Explorer: http://localhost:8042
 echo   ดู log backend:  docker compose logs -f backend
 echo   ดู log frontend: docker compose logs -f frontend
+echo   ดู log orthanc:  docker compose logs -f orthanc
 echo   หยุดระบบ:        docker compose down
 
 pause

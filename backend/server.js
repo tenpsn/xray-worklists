@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const dicomService = require('./dicomService');
+const orthancSync = require('./orthancSync');
 const settingsService = require('./settingsService');
 const db = require('./db');
 const Mppsservice = require('./Mppsservice');
@@ -61,6 +62,81 @@ function handleMppsStatusChange(accessionNumber, status) {
   }
 }
 
+// เพิ่ม port MPPS ใหม่เข้า "ports:" ของ service backend + BACKEND_PUBLISHED_MPPS_PORTS ใน docker-compose.yml
+// ทำแบบ "เพิ่มต่อท้าย" ไม่ลบของเดิม (7000/7001 ยังอยู่เหมือนเดิม) ปลอดภัยกว่าการแทนที่ค่าเดียวแบบ DICOM port
+// เพราะพอร์ต MPPS มีได้หลายค่าให้เลือกอยู่แล้ว - อ่าน/เขียนจากไฟล์จริงเสมอ กันเพิ่มซ้ำถ้ายังไม่ได้ docker compose up -d
+function ensureBackendMppsPortPublished(desiredPort) {
+  const composePath = orthancSync.getDockerComposeHostPath();
+  if (!composePath) {
+    console.warn('[Server] ---> หา docker-compose.yml ไม่เจอ (PROJECT_HOST_PATH ไม่ถูกต้อง) ต้องเพิ่ม port MPPS ใน docker-compose.yml เอง');
+    return false;
+  }
+
+  let text;
+  try {
+    text = fs.readFileSync(composePath, 'utf8');
+  } catch (err) {
+    console.error('[Server] ---> อ่าน docker-compose.yml ไม่สำเร็จ:', err.message);
+    return false;
+  }
+
+  const lines = text.split('\n');
+  const backendStart = lines.findIndex((l) => /^\s{2}backend:\s*$/.test(l));
+  if (backendStart === -1) {
+    console.warn('[Server] ---> หา service "backend:" ใน docker-compose.yml ไม่เจอ ต้องเพิ่ม port MPPS เอง');
+    return false;
+  }
+  let backendEnd = lines.length;
+  for (let i = backendStart + 1; i < lines.length; i++) {
+    if (/^\s{2}\S.*:\s*$/.test(lines[i])) { backendEnd = i; break; }
+  }
+
+  let envLineIdx = -1;
+  let currentPorts = [];
+  for (let i = backendStart; i < backendEnd; i++) {
+    const m = lines[i].match(/BACKEND_PUBLISHED_MPPS_PORTS=([0-9,]+)/);
+    if (m) { envLineIdx = i; currentPorts = m[1].split(',').filter(Boolean); break; }
+  }
+
+  if (currentPorts.includes(String(desiredPort))) {
+    return false; // publish ไว้แล้ว (อาจแค่ยังไม่ได้ docker compose up -d) ไม่ต้องแก้ซ้ำ
+  }
+
+  if (envLineIdx !== -1) {
+    const newList = [...currentPorts, String(desiredPort)].join(',');
+    lines[envLineIdx] = lines[envLineIdx].replace(/BACKEND_PUBLISHED_MPPS_PORTS=[0-9,]+/, `BACKEND_PUBLISHED_MPPS_PORTS=${newList}`);
+  } else {
+    console.warn('[Server] ---> หา BACKEND_PUBLISHED_MPPS_PORTS ใน docker-compose.yml ไม่เจอ ต้องเพิ่มเอง');
+  }
+
+  let portsStart = -1;
+  for (let i = backendStart; i < backendEnd; i++) {
+    if (/^\s{4}ports:\s*$/.test(lines[i])) { portsStart = i; break; }
+  }
+  if (portsStart === -1) {
+    console.warn('[Server] ---> หา "ports:" ของ service backend ใน docker-compose.yml ไม่เจอ ต้องเพิ่ม port MPPS เอง');
+  } else {
+    let lastPortLine = portsStart;
+    for (let i = portsStart + 1; i < backendEnd; i++) {
+      if (/^\s{6}-\s*"\d+:\d+"\s*$/.test(lines[i])) {
+        lastPortLine = i;
+      } else {
+        break;
+      }
+    }
+    lines.splice(lastPortLine + 1, 0, `      - "${desiredPort}:${desiredPort}"`);
+  }
+
+  try {
+    fs.writeFileSync(composePath, lines.join('\n'), 'utf8');
+    console.log(`[Server] ---> เพิ่ม port MPPS ${desiredPort} เข้า docker-compose.yml แล้ว (service backend)`);
+    return true;
+  } catch (err) {
+    console.error('[Server] ---> เขียน docker-compose.yml ไม่สำเร็จ:', err.message);
+    return false;
+  }
+}
+
 async function applySettings(settings, options = {}) {
   const { exitOnMppsFailure = false, restartAutoGenLoop = true } = options;
   const warnings = [];
@@ -75,8 +151,34 @@ async function applySettings(settings, options = {}) {
     warnings.push(`ตั้งค่าโฟลเดอร์ worklists ไม่สำเร็จ - ${err.message} ระบบจะใช้โฟลเดอร์เดิมต่อไป: ${toDisplayPath(dicomService.getWorklistDir())}`);
   }
 
+  // 1b. บอก Orthanc container ให้ใช้โฟลเดอร์ / AE Title / DICOM port เดียวกับที่ตั้งไว้ที่นี่
+  // แล้ว restart ให้เองอัตโนมัติถ้ามีค่าไหนเปลี่ยน
+  try {
+    await orthancSync.syncOrthancWorklistPath(
+      dicomService.getWorklistDir(),
+      settings.mwl.aet,
+      settings.mwl.port,
+      settings.mwl.modalityAet,
+      settings.mwl.modalityIp
+    );
+  } catch (err) {
+    console.error('[Settings] ---> sync โฟลเดอร์ worklists ไปยัง Orthanc ไม่สำเร็จ:', err.message);
+    warnings.push(`sync โฟลเดอร์ worklists ไปยัง Orthanc ไม่สำเร็จ - ${err.message} เครื่อง X-ray อาจยังไม่เห็นรายการล่าสุด`);
+  }
+
   // 2. MPPS server
   if (settings.mwl.mppsPort) {
+    const publishedMppsPorts = (process.env.BACKEND_PUBLISHED_MPPS_PORTS || '')
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (publishedMppsPorts.length > 0 && !publishedMppsPorts.includes(String(settings.mwl.mppsPort))) {
+      ensureBackendMppsPortPublished(settings.mwl.mppsPort);
+      console.warn(
+        `[Server] ---> เพิ่ม port MPPS ${settings.mwl.mppsPort} เข้า docker-compose.yml ให้แล้ว ` +
+        'แต่ยังไม่มีผลจริงจนกว่าจะรัน "docker compose up -d" เอง (restart container เฉยๆ ไม่พอ เพราะ port ผูกไว้ตอน create)'
+      );
+    }
     try {
       await Mppsservice.startMppsServer(settings.mwl.mppsPort, handleMppsStatusChange);
     } catch (err) {

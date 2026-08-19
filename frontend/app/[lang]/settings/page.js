@@ -22,6 +22,8 @@ const DEFAULT_FORM = {
     aet: '', // AET ของ Worklist Server เช่น Orthanc
     port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
     mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
+    modalityAet: '', // AE Title ของเครื่อง X-ray เอง (ลงทะเบียนใน DicomModalities ให้ query worklist ได้)
+    modalityIp: '', // IP ของเครื่อง X-ray เอง
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
@@ -349,6 +351,30 @@ export default function SettingsPage() {
               onChange={(e) => updateMwl('mppsPort', e.target.value)}
             />
           </label>
+
+          <label>
+            {dict.modalityAetLabel}
+            <input
+              type="text"
+              placeholder={dict.modalityAetPlaceholder}
+              value={form.mwl.modalityAet}
+              onChange={(e) => updateMwl('modalityAet', e.target.value)}
+            />
+          </label>
+
+          <label>
+            {dict.modalityIpLabel}
+            <input
+              type="text"
+              placeholder={dict.modalityIpPlaceholder}
+              value={form.mwl.modalityIp}
+              onChange={(e) => updateMwl('modalityIp', e.target.value)}
+            />
+          </label>
+
+          <p style={{ gridColumn: '1 / -1', fontSize: '0.85em', color: '#6b7280', margin: 0 }}>
+            {dict.modalityHint}
+          </p>
 
           <label style={{ gridColumn: '1 / -1' }}>
             {dict.worklistDirLabel}

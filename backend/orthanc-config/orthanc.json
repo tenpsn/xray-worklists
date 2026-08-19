@@ -1,0 +1,23 @@
+{
+  "Name": "XrayOrthanc",
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": false,
+  "HttpPort": 8042,
+  "DicomPort": 4242,
+  "DicomAet": "ORTHANC",
+  "DicomAlwaysAllowFind": false,
+  "DicomAlwaysAllowFindWorklist": false,
+  "DicomModalities": {
+    "XRAY1": [
+      "DROC",
+      "192.168.11.93",
+      104
+    ]
+  },
+  "Worklists": {
+    "Enable": true,
+    "Database": "/mnt/hostD/xray-worklists/backend/worklists"
+  }
+}

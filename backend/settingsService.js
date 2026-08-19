@@ -22,6 +22,8 @@ const DEFAULT_SETTINGS = {
     aet: process.env.MWL_AET || '',
     port: process.env.MWL_PORT || '',
     mppsPort: process.env.MPPS_PORT || '', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
+    modalityAet: process.env.MWL_MODALITY_AET || '', // AE Title ของเครื่อง X-ray เอง (ลงทะเบียนใน DicomModalities)
+    modalityIp: process.env.MWL_MODALITY_IP || '', // IP ของเครื่อง X-ray เอง
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
     autoGenerate: {
       intervalSec: Number(process.env.AUTO_GENERATE_INTERVAL_SEC) || 10,
