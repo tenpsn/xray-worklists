@@ -1,0 +1,72 @@
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      # ให้ backend สั่ง sync + restart container orthanc เองได้ผ่าน docker-proxy (ดู service docker-proxy ด้านล่าง)
+      - DOCKER_PROXY_URL=http://docker-proxy:2375
+      - ORTHANC_CONTAINER_NAME=xray-worklists-orthanc
+      - PROJECT_HOST_PATH=${PROJECT_HOST_PATH}
+      # ต้องตรงกับ "ports:" ของ service orthanc ด้านล่าง - ใช้เตือนตอนตั้ง DICOM port ใหม่ไม่ตรงกับที่ publish ไว้
+      - ORTHANC_PUBLISHED_DICOM_PORT=4242
+      # ต้องตรงกับ "ports:" ของ service backend ด้านล่าง (พอร์ตสำรองสำหรับ MPPS) - ใช้เตือนตอนตั้ง MPPS port ที่ไม่ได้ publish ไว้
+      - BACKEND_PUBLISHED_MPPS_PORTS=7000,7001
+    ports:
+      - "4000:4000"
+      - "4001:4001"
+      - "7000:7000"
+      - "7001:7001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      # mount root filesystem ของ host เข้ามาให้ folder picker ในหน้า Settings เห็นและเลือกได้ทั้งเครื่อง
+      # (ต้อง restart container ทุกครั้งที่ต้องการให้เห็น mount point ใหม่ เช่น disk ที่เสียบทีหลัง)
+      - type: bind
+        source: /
+        target: /mnt/hostRoot
+    mem_limit: 500m
+    restart: unless-stopped
+    depends_on:
+      - docker-proxy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    mem_limit: 400m
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  # ให้ backend เรียก Docker API ผ่าน proxy นี้ได้เท่าที่จำเป็น (แค่ restart container)
+  # ไม่เปิด docker.sock ตรงให้ backend ทั้งหมด กันไม่ให้ backend คุม Docker บนเครื่องได้ทุกอย่าง
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      - CONTAINERS=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  orthanc:
+    image: orthancteam/orthanc:latest
+    container_name: xray-worklists-orthanc
+    ports:
+      - "4242:4242"
+      - "8042:8042"
+    volumes:
+      - ./backend/orthanc-config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ./orthanc-data:/var/lib/orthanc/db
+      # mount root filesystem เหมือน backend (path เดียวกันเป๊ะ) worklist folder จะอยู่ที่ไหนก็อ่านได้
+      # โดยไม่ต้องแก้ volume ตรงนี้อีกเลย - backend เป็นคนสั่ง sync path ที่ใช้จริงให้เอง
+      - type: bind
+        source: /
+        target: /mnt/hostRoot
+        read_only: true
+    mem_limit: 300m
+    restart: unless-stopped

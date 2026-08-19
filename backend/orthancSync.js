@@ -4,14 +4,18 @@ const path = require('path');
 const ORTHANC_CONFIG_PATH = path.join(__dirname, 'orthanc-config', 'orthanc.json');
 
 // docker-compose.yml อยู่ที่ root ของโปรเจกต์ (นอก /app) ต้องอ้อมผ่าน /mnt/hostX เหมือน toOrthancPath
+// PROJECT_HOST_PATH มาจาก setup.bat (Windows, เช่น "D:\xray-worklists") หรือ setup.sh (Linux, เช่น "/root/xray-worklists")
 function getDockerComposeHostPath() {
   const projectHostPath = (process.env.PROJECT_HOST_PATH || '').trim();
-  if (!/^[a-zA-Z]:\\/.test(projectHostPath)) {
-    return null;
+  if (/^[a-zA-Z]:\\/.test(projectHostPath)) {
+    const drive = projectHostPath[0].toUpperCase();
+    const restOfProjectPath = projectHostPath.slice(2).replace(/\\/g, '/');
+    return `/mnt/host${drive}${restOfProjectPath}/docker-compose.yml`;
   }
-  const drive = projectHostPath[0].toUpperCase();
-  const restOfProjectPath = projectHostPath.slice(2).replace(/\\/g, '/');
-  return `/mnt/host${drive}${restOfProjectPath}/docker-compose.yml`;
+  if (projectHostPath.startsWith('/')) {
+    return `/mnt/hostRoot${projectHostPath}/docker-compose.yml`;
+  }
+  return null;
 }
 
 // __dirname ในคอนเทนเนอร์ backend คือ /app - Orthanc ไม่ได้ mount ./backend เข้าไป
@@ -29,14 +33,17 @@ function toOrthancPath(absoluteWorklistPath) {
   }
 
   const projectHostPath = (process.env.PROJECT_HOST_PATH || '').trim();
-  if (!/^[a-zA-Z]:\\/.test(projectHostPath)) {
-    return null;
-  }
-
   const rest = resolved.slice(APP_ROOT.length).replace(/\\/g, '/');
-  const drive = projectHostPath[0].toUpperCase();
-  const restOfProjectPath = projectHostPath.slice(2).replace(/\\/g, '/');
-  return `/mnt/host${drive}${restOfProjectPath}/backend${rest}`;
+
+  if (/^[a-zA-Z]:\\/.test(projectHostPath)) {
+    const drive = projectHostPath[0].toUpperCase();
+    const restOfProjectPath = projectHostPath.slice(2).replace(/\\/g, '/');
+    return `/mnt/host${drive}${restOfProjectPath}/backend${rest}`;
+  }
+  if (projectHostPath.startsWith('/')) {
+    return `/mnt/hostRoot${projectHostPath}/backend${rest}`;
+  }
+  return null;
 }
 
 // sync โฟลเดอร์ worklist + AE Title + DICOM port เข้า orthanc.json ให้ตรงกับหน้า Settings เสมอ

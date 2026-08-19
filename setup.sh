@@ -28,6 +28,9 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
+# ใช้ docker-compose.linux.yml (mount root filesystem "/" แทน C:\ D:\ ของ Windows)
+COMPOSE=(docker compose -f docker-compose.linux.yml)
+
 echo "-- IP ของเครื่องนี้ในวง LAN --"
 echo "  ถ้าจะให้เครื่องอื่น (เช่นเครื่องหน้า X-ray, เครื่องอื่นในคลินิก) เปิดเว็บนี้ได้ ต้องกรอก IP ของเครื่องนี้"
 echo "  ดู IP ได้จากคำสั่ง ip addr หรือ ifconfig (หา inet address ของวง LAN)"
@@ -75,19 +78,19 @@ else
 fi
 
 echo "-- docker compose build --"
-if ! docker compose build; then
+if ! "${COMPOSE[@]}" build; then
     echo "ERROR: docker compose build ล้มเหลว ดูข้อความ error ด้านบน"
     exit 1
 fi
 
 echo "-- docker compose up -d --"
-if ! docker compose up -d; then
+if ! "${COMPOSE[@]}" up -d; then
     echo "ERROR: docker compose up ล้มเหลว ดูข้อความ error ด้านบน"
     exit 1
 fi
 
 echo "-- สถานะ container --"
-docker compose ps
+"${COMPOSE[@]}" ps
 
 echo
 echo "เสร็จแล้ว!"
@@ -97,7 +100,7 @@ if [ -n "$LAN_IP" ]; then
 fi
 echo "  ไปตั้งค่าฐานข้อมูล HIS ต่อได้ที่หน้า Settings ในเว็บ"
 echo "  Orthanc Explorer: http://localhost:8042"
-echo "  ดู log backend:  docker compose logs -f backend"
-echo "  ดู log frontend: docker compose logs -f frontend"
-echo "  ดู log orthanc:  docker compose logs -f orthanc"
-echo "  หยุดระบบ:        docker compose down"
+echo "  ดู log backend:  docker compose -f docker-compose.linux.yml logs -f backend"
+echo "  ดู log frontend: docker compose -f docker-compose.linux.yml logs -f frontend"
+echo "  ดู log orthanc:  docker compose -f docker-compose.linux.yml logs -f orthanc"
+echo "  หยุดระบบ:        docker compose -f docker-compose.linux.yml down"

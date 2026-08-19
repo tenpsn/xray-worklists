@@ -810,9 +810,13 @@ function listWindowsDrives() {
 
 // ตอนรันใน Docker (Linux) จะเห็นแค่ไดรฟ์ host ที่ mount เข้ามาผ่าน docker-compose.yml เท่านั้น
 // (ต่างจาก win32 ที่เห็นได้ทุกไดรฟ์แบบสด ๆ รวม USB ที่เสียบทีหลัง)
+// - host เป็น Windows (docker-compose.yml): mount ทีละไดรฟ์ C:\ D:\
+// - host เป็น Linux (docker-compose.linux.yml): mount root filesystem "/" ทั้งก้อนอันเดียว
+// มีแค่ mount ที่ docker-compose ไฟล์ที่ใช้จริงประกาศไว้เท่านั้นที่จะ exist ข้างใน container ที่เหลือ filter ทิ้งไปเอง
 const HOST_DRIVE_MOUNTS = [
   { name: 'C:', path: '/mnt/hostC' },
   { name: 'D:', path: '/mnt/hostD' },
+  { name: '/', path: '/mnt/hostRoot' },
 ];
 
 function listMountedHostDrives() {
@@ -842,8 +846,12 @@ function toDisplayPath(p) {
   for (const m of listMountedHostDrives()) {
     const mountRoot = path.resolve(m.path);
     if (resolved === mountRoot || resolved.startsWith(mountRoot + path.sep)) {
-      const rest = resolved.slice(mountRoot.length).replace(/\//g, '\\');
-      return `${m.name}${rest || '\\'}`;
+      const rest = resolved.slice(mountRoot.length);
+      // mount ไดรฟ์ Windows (ชื่อ "C:") แสดงผลแบบ Windows path, mount root ของ Linux (ชื่อ "/") คือ path จริงอยู่แล้ว
+      if (/^[A-Za-z]:$/.test(m.name)) {
+        return `${m.name}${rest.replace(/\//g, '\\') || '\\'}`;
+      }
+      return rest || '/';
     }
   }
 
