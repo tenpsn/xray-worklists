@@ -19,9 +19,9 @@ const DEFAULT_SETTINGS = {
   },
   mwl: {
     lang: process.env.MWL_LANG === 'th' ? 'th' : 'en',
-    aet: process.env.MWL_AET || '',
-    port: process.env.MWL_PORT || '',
-    mppsPort: process.env.MPPS_PORT || '', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
+    aet: process.env.MWL_AET || 'ORTHANC',
+    port: process.env.MWL_PORT || '4242',
+    mppsPort: process.env.MPPS_PORT || '7001', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
     // true (ค่าเริ่มต้น) = DicomAlwaysAllowFind/FindWorklist เปิดหมด ไม่ต้องลงทะเบียนเครื่อง Modality ก็ query ได้
     // false = ปิดหมด ต้องลงทะเบียนเครื่อง Modality ทีละแถวใน modalities ด้านล่างเท่านั้นถึงจะ query ได้
     modalityAlwaysAllow: true,
