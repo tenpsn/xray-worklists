@@ -16,6 +16,11 @@ services:
       - "4001:4001"
       - "7000:7000"
       - "7001:7001"
+    # Docker Engine บน Linux (ต่างจาก Docker Desktop บน Windows/Mac) ไม่ผูก host.docker.internal ให้อัตโนมัติ
+    # เพิ่มบรรทัดนี้เพื่อให้กรอก "host.docker.internal" ในหน้า Settings ได้เหมือนกันทุก OS
+    # (ใช้ตอน HIS database รันอยู่บนเครื่อง Linux เครื่องเดียวกับที่รัน Docker นี้)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
       - /app/node_modules

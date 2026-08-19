@@ -22,8 +22,8 @@ const DEFAULT_FORM = {
     aet: '', // AET ของ Worklist Server เช่น Orthanc
     port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
     mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
-    modalityAet: '', // AE Title ของเครื่อง X-ray เอง (ลงทะเบียนใน DicomModalities ให้ query worklist ได้)
-    modalityIp: '', // IP ของเครื่อง X-ray เอง
+    modalityAlwaysAllow: true, // true = allow ทุกเครื่อง query worklist ได้ (ค่าเริ่มต้น), false = ต้องลงทะเบียนเครื่องใน modalities เท่านั้น
+    modalities: [], // [{ aet, ip, port }] ใช้ตอน modalityAlwaysAllow เป็น false เท่านั้น เพิ่มได้หลายแถว
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
@@ -104,6 +104,30 @@ export default function SettingsPage() {
     setForm((prev) => ({
       ...prev,
       mwl: { ...prev.mwl, autoGenerate: { ...prev.mwl.autoGenerate, [field]: value } },
+    }));
+  }
+
+  function addModalityRow() {
+    setForm((prev) => ({
+      ...prev,
+      mwl: { ...prev.mwl, modalities: [...prev.mwl.modalities, { aet: '', ip: '', port: '' }] },
+    }));
+  }
+
+  function removeModalityRow(index) {
+    setForm((prev) => ({
+      ...prev,
+      mwl: { ...prev.mwl, modalities: prev.mwl.modalities.filter((_, i) => i !== index) },
+    }));
+  }
+
+  function updateModalityRow(index, field, value) {
+    setForm((prev) => ({
+      ...prev,
+      mwl: {
+        ...prev.mwl,
+        modalities: prev.mwl.modalities.map((m, i) => (i === index ? { ...m, [field]: value } : m)),
+      },
     }));
   }
 
@@ -352,29 +376,52 @@ export default function SettingsPage() {
             />
           </label>
 
-          <label>
-            {dict.modalityAetLabel}
-            <input
-              type="text"
-              placeholder={dict.modalityAetPlaceholder}
-              value={form.mwl.modalityAet}
-              onChange={(e) => updateMwl('modalityAet', e.target.value)}
-            />
-          </label>
-
-          <label>
-            {dict.modalityIpLabel}
-            <input
-              type="text"
-              placeholder={dict.modalityIpPlaceholder}
-              value={form.mwl.modalityIp}
-              onChange={(e) => updateMwl('modalityIp', e.target.value)}
-            />
+          <label style={{ gridColumn: '1 / -1' }}>
+            {dict.modalityAlwaysAllowLabel}
+            <select
+              value={form.mwl.modalityAlwaysAllow ? 'true' : 'false'}
+              onChange={(e) => updateMwl('modalityAlwaysAllow', e.target.value === 'true')}
+            >
+              <option value="true">{dict.modalityAllowAnyOption}</option>
+              <option value="false">{dict.modalityWhitelistOption}</option>
+            </select>
           </label>
 
           <p style={{ gridColumn: '1 / -1', fontSize: '0.85em', color: '#6b7280', margin: 0 }}>
             {dict.modalityHint}
           </p>
+
+          {!form.mwl.modalityAlwaysAllow && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {form.mwl.modalities.map((m, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    placeholder={dict.modalityAetPlaceholder}
+                    value={m.aet}
+                    onChange={(e) => updateModalityRow(i, 'aet', e.target.value)}
+                    style={{ flex: 1, minWidth: '160px' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder={dict.modalityIpPlaceholder}
+                    value={m.ip}
+                    onChange={(e) => updateModalityRow(i, 'ip', e.target.value)}
+                    style={{ flex: 1, minWidth: '140px' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder={dict.modalityPortPlaceholder}
+                    value={m.port}
+                    onChange={(e) => updateModalityRow(i, 'port', e.target.value)}
+                    style={{ width: '90px' }}
+                  />
+                  <button type="button" onClick={() => removeModalityRow(i)}>{dict.removeModalityButton}</button>
+                </div>
+              ))}
+              <button type="button" onClick={addModalityRow}>{dict.addModalityButton}</button>
+            </div>
+          )}
 
           <label style={{ gridColumn: '1 / -1' }}>
             {dict.worklistDirLabel}

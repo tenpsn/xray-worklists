@@ -22,8 +22,10 @@ const DEFAULT_SETTINGS = {
     aet: process.env.MWL_AET || '',
     port: process.env.MWL_PORT || '',
     mppsPort: process.env.MPPS_PORT || '', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
-    modalityAet: process.env.MWL_MODALITY_AET || '', // AE Title ของเครื่อง X-ray เอง (ลงทะเบียนใน DicomModalities)
-    modalityIp: process.env.MWL_MODALITY_IP || '', // IP ของเครื่อง X-ray เอง
+    // true (ค่าเริ่มต้น) = DicomAlwaysAllowFind/FindWorklist เปิดหมด ไม่ต้องลงทะเบียนเครื่อง Modality ก็ query ได้
+    // false = ปิดหมด ต้องลงทะเบียนเครื่อง Modality ทีละแถวใน modalities ด้านล่างเท่านั้นถึงจะ query ได้
+    modalityAlwaysAllow: true,
+    modalities: [], // [{ aet, ip, port }] รายการเครื่อง Modality ที่ลงทะเบียนไว้ (ลงทะเบียนใน DicomModalities), เพิ่มได้หลายแถว
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
     autoGenerate: {
       intervalSec: Number(process.env.AUTO_GENERATE_INTERVAL_SEC) || 10,
@@ -35,13 +37,27 @@ const DEFAULT_SETTINGS = {
   },
 };
 
+// รองรับไฟล์ settings.json เก่าที่ยังเก็บ modalityAet/modalityIp เดี่ยว (ก่อนรองรับหลายแถว)
+// แปลงเป็น modalities: [{ aet, ip, port }] แถวเดียว และปิด modalityAlwaysAllow เพราะของเดิมลงทะเบียนไว้แบบเจาะจงอยู่แล้ว
+function migrateLegacyModality(savedMwl) {
+  if (!savedMwl || savedMwl.modalities || (!savedMwl.modalityAet && !savedMwl.modalityIp)) {
+    return savedMwl;
+  }
+  const { modalityAet, modalityIp, ...rest } = savedMwl;
+  return {
+    ...rest,
+    modalityAlwaysAllow: false,
+    modalities: [{ aet: modalityAet || '', ip: modalityIp || '', port: 104 }],
+  };
+}
+
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
       return {
         his: { ...DEFAULT_SETTINGS.his, ...(saved.his || {}) },
-        mwl: { ...DEFAULT_SETTINGS.mwl, ...(saved.mwl || {}) },
+        mwl: { ...DEFAULT_SETTINGS.mwl, ...migrateLegacyModality(saved.mwl || {}) },
       };
     }
   } catch (err) {

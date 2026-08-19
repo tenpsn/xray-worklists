@@ -49,12 +49,10 @@ function toOrthancPath(absoluteWorklistPath) {
 // sync โฟลเดอร์ worklist + AE Title + DICOM port เข้า orthanc.json ให้ตรงกับหน้า Settings เสมอ
 // เทียบกับค่าที่เขียนไว้ในไฟล์จริง ไม่ใช่ตัวแปรในหน่วยความจำ เพราะ backend อาจ restart เองได้ (เช่น container ค้าง/OOM)
 // ต้องอ่านของจริงทุกครั้ง กัน restart Orthanc ซ้ำโดยไม่จำเป็น
-// key คงที่สำหรับเครื่อง X-ray เครื่องเดียวที่ลงทะเบียนผ่านหน้า Settings ได้ (ไม่รองรับหลายเครื่องตอนนี้)
-const MODALITY_KEY = 'XRAY1';
-// พอร์ตของเครื่อง X-ray เอง ไม่ได้ใช้ validate จริง (Orthanc เช็คแค่ AET) เลยตั้งค่าคงที่ไว้ ไม่ต้องให้กรอก
-const MODALITY_PORT = 104;
+// prefix ของ key ใน DicomModalities แต่ละแถว (XRAY1, XRAY2, ...) - ลำดับตามที่กรอกในหน้า Settings
+const MODALITY_KEY_PREFIX = 'XRAY';
 
-async function syncOrthancWorklistPath(absoluteWorklistPath, aet, port, modalityAet, modalityIp) {
+async function syncOrthancWorklistPath(absoluteWorklistPath, aet, port, modalityAlwaysAllow, modalities) {
   const orthancPath = toOrthancPath(absoluteWorklistPath);
   if (!orthancPath) {
     console.warn('[Orthanc] ---> แปลง path ให้ Orthanc ไม่สำเร็จ');
@@ -83,16 +81,43 @@ async function syncOrthancWorklistPath(absoluteWorklistPath, aet, port, modality
     console.log(`[Orthanc] ---> อัปเดต DicomAet เป็น: ${desiredAet}`);
   }
 
-  const desiredModalityAet = (modalityAet || '').trim();
-  const desiredModalityIp = (modalityIp || '').trim();
-  if (desiredModalityAet && desiredModalityIp) {
-    const desiredModality = [desiredModalityAet, desiredModalityIp, MODALITY_PORT];
-    const currentModality = config.DicomModalities && config.DicomModalities[MODALITY_KEY];
-    if (JSON.stringify(currentModality) !== JSON.stringify(desiredModality)) {
-      config.DicomModalities = { ...(config.DicomModalities || {}), [MODALITY_KEY]: desiredModality };
-      changed = true;
-      console.log(`[Orthanc] ---> อัปเดต DicomModalities.${MODALITY_KEY} เป็น: ${JSON.stringify(desiredModality)}`);
-    }
+  const desiredAlwaysAllow = modalityAlwaysAllow !== false; // ค่าเริ่มต้น true ถ้าไม่ได้ระบุ
+  if (config.DicomAlwaysAllowFind !== desiredAlwaysAllow) {
+    config.DicomAlwaysAllowFind = desiredAlwaysAllow;
+    changed = true;
+    console.log(`[Orthanc] ---> อัปเดต DicomAlwaysAllowFind เป็น: ${desiredAlwaysAllow}`);
+  }
+  if (config.DicomAlwaysAllowFindWorklist !== desiredAlwaysAllow) {
+    config.DicomAlwaysAllowFindWorklist = desiredAlwaysAllow;
+    changed = true;
+    console.log(`[Orthanc] ---> อัปเดต DicomAlwaysAllowFindWorklist เป็น: ${desiredAlwaysAllow}`);
+  }
+
+  // whitelist mode (allow=false) ต้องเช็ค IP ต้นทางตรงกับที่ลงทะเบียนด้วย ไม่งั้น field IP ที่กรอกไว้จะไม่มีผลจริง
+  // allow-any mode (allow=true) DicomModalities ว่างอยู่แล้ว ไม่มีอะไรให้เช็ค เลยปิดไว้ (ค่า default ของ Orthanc)
+  const desiredCheckModalityHost = !desiredAlwaysAllow;
+  if (config.DicomCheckModalityHost !== desiredCheckModalityHost) {
+    config.DicomCheckModalityHost = desiredCheckModalityHost;
+    changed = true;
+    console.log(`[Orthanc] ---> อัปเดต DicomCheckModalityHost เป็น: ${desiredCheckModalityHost}`);
+  }
+
+  // true = allow หมด ไม่ต้องลงทะเบียนเครื่อง Modality เลย, false = ต้องลงทะเบียนทีละแถวเท่านั้น
+  const desiredModalities = {};
+  if (!desiredAlwaysAllow) {
+    (modalities || []).forEach((m, i) => {
+      const modalityAet = (m.aet || '').trim();
+      const modalityIp = (m.ip || '').trim();
+      const modalityPort = parseInt(m.port, 10);
+      if (modalityAet && modalityIp && !isNaN(modalityPort)) {
+        desiredModalities[`${MODALITY_KEY_PREFIX}${i + 1}`] = [modalityAet, modalityIp, modalityPort];
+      }
+    });
+  }
+  if (JSON.stringify(config.DicomModalities || {}) !== JSON.stringify(desiredModalities)) {
+    config.DicomModalities = desiredModalities;
+    changed = true;
+    console.log(`[Orthanc] ---> อัปเดต DicomModalities เป็น: ${JSON.stringify(desiredModalities)}`);
   }
 
   const previousPort = config.DicomPort;

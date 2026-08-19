@@ -158,8 +158,8 @@ async function applySettings(settings, options = {}) {
       dicomService.getWorklistDir(),
       settings.mwl.aet,
       settings.mwl.port,
-      settings.mwl.modalityAet,
-      settings.mwl.modalityIp
+      settings.mwl.modalityAlwaysAllow,
+      settings.mwl.modalities
     );
   } catch (err) {
     console.error('[Settings] ---> sync โฟลเดอร์ worklists ไปยัง Orthanc ไม่สำเร็จ:', err.message);

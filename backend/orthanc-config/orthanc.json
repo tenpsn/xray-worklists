@@ -9,6 +9,7 @@
   "DicomAet": "ORTHANC",
   "DicomAlwaysAllowFind": false,
   "DicomAlwaysAllowFindWorklist": false,
+  "DicomCheckModalityHost": true,
   "DicomModalities": {
     "XRAY1": [
       "DROC",
