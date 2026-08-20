@@ -6,8 +6,6 @@ import Link from 'next/link';
 import { formatNameField, formatPrefixField, formatDoctorField } from '../../lib/nameDisplay';
 import { getDictionary, formatDbError } from '../../lib/i18n';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
 export default function Page() {
   const { lang: rawLang } = useParams();
   const lang = rawLang === 'th' ? 'th' : 'en';
@@ -57,7 +55,7 @@ export default function Page() {
   async function confirmReadFilm(xn) {
     setConfirmingXn(xn);
     try {
-      const res = await fetch(`${API_URL}/api/xray-report/confirm-read-film`, {
+      const res = await fetch(`/api/xray-report/confirm-read-film`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ xn }),
@@ -124,7 +122,7 @@ export default function Page() {
         xns_NY
       };
 
-      const res = await fetch(`${API_URL}/api/xray-report`, {
+      const res = await fetch(`/api/xray-report`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

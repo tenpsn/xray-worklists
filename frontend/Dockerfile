@@ -9,10 +9,6 @@ COPY . .
 # โปรเจกต์นี้ไม่มีโฟลเดอร์ public/ แต่ COPY ขั้นถัดไปต้องการให้มีอยู่จริง
 RUN mkdir -p public
 
-# NEXT_PUBLIC_* ถูกฝังตอน build ไม่ใช่ตอน runtime
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runner

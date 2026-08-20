@@ -5,8 +5,6 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getDictionary } from '../../lib/i18n';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
 export default function OrthancCleanerPage() {
   const { lang: rawLang } = useParams();
   const lang = rawLang === 'th' ? 'th' : 'en';
@@ -52,7 +50,7 @@ export default function OrthancCleanerPage() {
     setSearchStatus({ text: dict.searchingStatus, type: 'info' });
 
     try {
-      const res = await fetch(`${API_URL}/api/orthanc/find`, {
+      const res = await fetch(`/api/orthanc/find`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orthancUrl, username, password, from: fromDate, to: toDate }),
@@ -83,7 +81,7 @@ export default function OrthancCleanerPage() {
   async function pollDeleteJob(jobId, total) {
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      const res = await fetch(`${API_URL}/api/orthanc/delete/status/${jobId}`);
+      const res = await fetch(`/api/orthanc/delete/status/${jobId}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.message || dict.deleteConnectionError);
 
@@ -103,7 +101,7 @@ export default function OrthancCleanerPage() {
     setDeleteStatus({ text: dict.deletingText(items.length), type: 'info' });
 
     try {
-      const startRes = await fetch(`${API_URL}/api/orthanc/delete/start`, {
+      const startRes = await fetch(`/api/orthanc/delete/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orthancUrl, username, password, items: items.map((s) => ({ id: s.id })) }),

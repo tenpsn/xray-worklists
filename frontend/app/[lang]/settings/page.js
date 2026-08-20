@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getDictionary, formatDbError } from '../../lib/i18n';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
 const DEFAULT_FORM = {
   his: {
     hisSystem: '', // 'hosxp' | 'softcon' | 'hl7'
@@ -59,7 +57,7 @@ export default function SettingsPage() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        const res = await fetch(`${API_URL}/api/settings`);
+        const res = await fetch(`/api/settings`);
         const json = await res.json();
         if (json.success) {
           setForm({
@@ -145,7 +143,7 @@ export default function SettingsPage() {
     setPickerLoading(true);
     setPickerError('');
     try {
-      const res = await fetch(`${API_URL}/api/fs/browse?path=${encodeURIComponent(p)}`);
+      const res = await fetch(`/api/fs/browse?path=${encodeURIComponent(p)}`);
       const json = await res.json();
       if (json.success) {
         setPickerPath(json.path);
@@ -172,7 +170,7 @@ export default function SettingsPage() {
   async function handleCreateFolder() {
     if (!newFolderName.trim()) return;
     try {
-      const res = await fetch(`${API_URL}/api/fs/mkdir`, {
+      const res = await fetch(`/api/fs/mkdir`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parentPath: pickerPath, name: newFolderName.trim() }),
@@ -194,7 +192,7 @@ export default function SettingsPage() {
     setStatus(dict.detectingStatus);
     setStatusType('info');
     try {
-      const res = await fetch(`${API_URL}/api/settings/detect-his-system`, {
+      const res = await fetch(`/api/settings/detect-his-system`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ his: form.his }),
@@ -227,7 +225,7 @@ export default function SettingsPage() {
     try {
       // เข้ามาที่หน้านี้แล้วกด Save ถือว่าเลือกภาษาเว็บแน่ชัดแล้ว (เผื่อมาจาก bookmark เก่าที่ข้ามหน้าเลือกภาษาไป)
       const payload = { ...form, mwl: { ...form.mwl, uiLangConfirmed: true } };
-      const res = await fetch(`${API_URL}/api/settings`, {
+      const res = await fetch(`/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

@@ -52,10 +52,6 @@ if [ ! -f ".env" ]; then
     CURRENT_DIR="$(pwd)"
     ESCAPED_DIR=$(printf '%s' "$CURRENT_DIR" | sed -e 's/[\&/]/\\&/g')
     sed -i.bak "s#^PROJECT_HOST_PATH=.*#PROJECT_HOST_PATH=${ESCAPED_DIR}#" ".env" && rm -f ".env.bak"
-    if [ -n "$LAN_IP" ]; then
-        # ตั้ง NEXT_PUBLIC_API_URL เป็น IP วง LAN แทน localhost เพื่อให้เครื่องอื่นเปิดเว็บแล้วเรียก backend ได้จริง
-        sed -i.bak "s#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=http://${LAN_IP}:4000#" ".env" && rm -f ".env.bak"
-    fi
     echo "  สร้าง .env จาก .env.example แล้ว (ใช้ค่า default, ตั้ง PROJECT_HOST_PATH เป็น $CURRENT_DIR ให้อัตโนมัติ)"
 else
     echo "  .env มีอยู่แล้ว ข้าม"

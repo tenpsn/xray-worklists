@@ -3,8 +3,6 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
 function ChooseLanguageForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -19,7 +17,7 @@ function ChooseLanguageForm() {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/api/settings`, {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mwl: { lang, uiLangConfirmed: true } }),

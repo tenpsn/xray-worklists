@@ -47,10 +47,6 @@ if not exist ".env" (
     rem PROJECT_HOST_PATH ใน .env.example เป็นแค่ค่าตัวอย่าง ต้องแทนที่ด้วย path จริงที่วางโปรเจกต์นี้ไว้
     rem (ใช้แปลง path โฟลเดอร์ worklist default ให้ Orthanc ตอน sync อัตโนมัติ ถ้าไม่ตรงจะ sync ผิดโฟลเดอร์)
     powershell -NoProfile -Command "(Get-Content '.env') -replace 'PROJECT_HOST_PATH=.*', 'PROJECT_HOST_PATH=%CD%' | Set-Content '.env'"
-    if defined LAN_IP (
-        rem ตั้ง NEXT_PUBLIC_API_URL เป็น IP วง LAN แทน localhost เพื่อให้เครื่องอื่นเปิดเว็บแล้วเรียก backend ได้จริง
-        powershell -NoProfile -Command "(Get-Content '.env') -replace 'NEXT_PUBLIC_API_URL=.*', 'NEXT_PUBLIC_API_URL=http://%LAN_IP%:4000' | Set-Content '.env'"
-    )
     echo   สร้าง .env จาก .env.example แล้ว ^(ใช้ค่า default, ตั้ง PROJECT_HOST_PATH เป็น %CD% ให้อัตโนมัติ^)
 ) else (
     echo   .env มีอยู่แล้ว ข้าม
