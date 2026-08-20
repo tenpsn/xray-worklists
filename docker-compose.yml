@@ -36,6 +36,12 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        # Next.js ใช้ค่านี้ตอน build เพื่อสร้าง server-side proxy ไปยัง backend ใน network เดียวกัน
+        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:4000}
+    environment:
+      # กำหนดซ้ำตอน runtime สำหรับ standalone server และป้องกันค่าเก่าจาก image เดิม
+      - BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:4000}
     ports:
       - "3000:3000"
       - "3001:3001"
