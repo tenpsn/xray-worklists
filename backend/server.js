@@ -811,8 +811,8 @@ function listWindowsDrives() {
 
 // ตอนรันใน Docker (Linux) จะเห็นแค่ไดรฟ์ host ที่ mount เข้ามาผ่าน docker-compose.yml เท่านั้น
 // (ต่างจาก win32 ที่เห็นได้ทุกไดรฟ์แบบสด ๆ รวม USB ที่เสียบทีหลัง)
-// - host เป็น Windows (docker-compose.yml): mount ทีละไดรฟ์ C:\ D:\
-// - host เป็น Linux (docker-compose.linux.yml): mount root filesystem "/" ทั้งก้อนอันเดียว
+// - host เป็น Windows (docker-compose.windows.yml): mount ทีละไดรฟ์ C:\ D:\
+// - host เป็น Linux (docker-compose.yml): mount root filesystem "/" ทั้งก้อนอันเดียว
 // มีแค่ mount ที่ docker-compose ไฟล์ที่ใช้จริงประกาศไว้เท่านั้นที่จะ exist ข้างใน container ที่เหลือ filter ทิ้งไปเอง
 const HOST_DRIVE_MOUNTS = [
   { name: 'C:', path: '/mnt/hostC' },

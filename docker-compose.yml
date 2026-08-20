@@ -16,17 +16,19 @@ services:
       - "4001:4001"
       - "7000:7000"
       - "7001:7001"
+    # Docker Engine บน Linux (ต่างจาก Docker Desktop บน Windows/Mac) ไม่ผูก host.docker.internal ให้อัตโนมัติ
+    # เพิ่มบรรทัดนี้เพื่อให้กรอก "host.docker.internal" ในหน้า Settings ได้เหมือนกันทุก OS
+    # (ใช้ตอน HIS database รันอยู่บนเครื่อง Linux เครื่องเดียวกับที่รัน Docker นี้)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
       - /app/node_modules
-      # mount ไดรฟ์ host เข้ามาให้ folder picker ในหน้า Settings เห็นและเลือกได้
-      # (ต้อง restart container ทุกครั้งที่ต้องการให้เห็นไดรฟ์ใหม่ เช่น USB ที่เสียบทีหลัง)
+      # mount root filesystem ของ host เข้ามาให้ folder picker ในหน้า Settings เห็นและเลือกได้ทั้งเครื่อง
+      # (ต้อง restart container ทุกครั้งที่ต้องการให้เห็น mount point ใหม่ เช่น disk ที่เสียบทีหลัง)
       - type: bind
-        source: C:\
-        target: /mnt/hostC
-      - type: bind
-        source: D:\
-        target: /mnt/hostD
+        source: /
+        target: /mnt/hostRoot
     mem_limit: 500m
     restart: unless-stopped
     depends_on:
@@ -63,15 +65,11 @@ services:
     volumes:
       - ./backend/orthanc-config/orthanc.json:/etc/orthanc/orthanc.json:ro
       - ./orthanc-data:/var/lib/orthanc/db
-      # mount ทั้งไดรฟ์เหมือน backend (path เดียวกันเป๊ะ) worklist folder จะอยู่ที่ไหนก็อ่านได้
+      # mount root filesystem เหมือน backend (path เดียวกันเป๊ะ) worklist folder จะอยู่ที่ไหนก็อ่านได้
       # โดยไม่ต้องแก้ volume ตรงนี้อีกเลย - backend เป็นคนสั่ง sync path ที่ใช้จริงให้เอง
       - type: bind
-        source: C:\
-        target: /mnt/hostC
-        read_only: true
-      - type: bind
-        source: D:\
-        target: /mnt/hostD
+        source: /
+        target: /mnt/hostRoot
         read_only: true
     mem_limit: 300m
     restart: unless-stopped

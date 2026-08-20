@@ -68,8 +68,11 @@ if not exist "backend\.env" (
     echo   backend\.env มีอยู่แล้ว ข้าม
 )
 
+rem ใช้ docker-compose.windows.yml (mount ไดรฟ์ C:\ D:\ แบบ Windows แทน root filesystem ของ Linux)
+set COMPOSE=docker compose -f docker-compose.windows.yml
+
 echo -- docker compose build --
-docker compose build
+%COMPOSE% build
 if errorlevel 1 (
     echo ERROR: docker compose build ล้มเหลว ดูข้อความ error ด้านบน
     pause
@@ -77,7 +80,7 @@ if errorlevel 1 (
 )
 
 echo -- docker compose up -d --
-docker compose up -d
+%COMPOSE% up -d
 if errorlevel 1 (
     echo ERROR: docker compose up ล้มเหลว ดูข้อความ error ด้านบน
     pause
@@ -85,7 +88,7 @@ if errorlevel 1 (
 )
 
 echo -- สถานะ container --
-docker compose ps
+%COMPOSE% ps
 
 echo.
 echo เสร็จแล้ว!
@@ -93,10 +96,10 @@ echo   เปิดเว็บ ^(เครื่องนี้^):         http
 if defined LAN_IP echo   เปิดเว็บ ^(เครื่องอื่นในวง LAN^): http://%LAN_IP%:3000
 echo   ไปตั้งค่าฐานข้อมูล HIS ต่อได้ที่หน้า Settings ในเว็บ
 echo   Orthanc Explorer: http://localhost:8042
-echo   ดู log backend:  docker compose logs -f backend
-echo   ดู log frontend: docker compose logs -f frontend
-echo   ดู log orthanc:  docker compose logs -f orthanc
-echo   หยุดระบบ:        docker compose down
+echo   ดู log backend:  docker compose -f docker-compose.windows.yml logs -f backend
+echo   ดู log frontend: docker compose -f docker-compose.windows.yml logs -f frontend
+echo   ดู log orthanc:  docker compose -f docker-compose.windows.yml logs -f orthanc
+echo   หยุดระบบ:        docker compose -f docker-compose.windows.yml down
 
 pause
 endlocal

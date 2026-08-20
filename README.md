@@ -185,7 +185,7 @@ docker compose down --rmi all
 ไม่ต้อง เว็บนี้แค่โชว์ตารางให้ดู การยืนยันผลยังทำผ่านระบบ HIS ตามเดิม
 
 **ย้ายไป deploy บน Linux server ที่ไม่ใช่ Docker Desktop ได้ไหม?**
-ได้ แต่ `host.docker.internal` (ในขั้นที่ 4) จะใช้ไม่ได้ทันที ต้องเพิ่ม `extra_hosts: ["host.docker.internal:host-gateway"]` ให้ service `backend` ใน `docker-compose.yml` ก่อน
+ได้ `docker-compose.yml` รองรับ Linux อยู่แล้ว (mount root filesystem แทน `C:\`/`D:\` และตั้ง `host.docker.internal` ให้อัตโนมัติ) รันด้วย `./setup.sh` ได้เลย ส่วน Windows ใช้ `docker-compose.windows.yml` ผ่าน `setup.bat` แทน
 
 ---
 
