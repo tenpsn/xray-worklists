@@ -10,11 +10,10 @@ services:
       # ต้องตรงกับ "ports:" ของ service orthanc ด้านล่าง - ใช้เตือนตอนตั้ง DICOM port ใหม่ไม่ตรงกับที่ publish ไว้
       - ORTHANC_PUBLISHED_DICOM_PORT=4242
       # ต้องตรงกับ "ports:" ของ service backend ด้านล่าง (พอร์ตสำรองสำหรับ MPPS) - ใช้เตือนตอนตั้ง MPPS port ที่ไม่ได้ publish ไว้
-      - BACKEND_PUBLISHED_MPPS_PORTS=7000,7001
+      - BACKEND_PUBLISHED_MPPS_PORTS=7001
     ports:
       - "4000:4000"
       - "4001:4001"
-      - "7000:7000"
       - "7001:7001"
     # Docker Engine บน Linux (ต่างจาก Docker Desktop บน Windows/Mac) ไม่ผูก host.docker.internal ให้อัตโนมัติ
     # เพิ่มบรรทัดนี้เพื่อให้กรอก "host.docker.internal" ในหน้า Settings ได้เหมือนกันทุก OS
