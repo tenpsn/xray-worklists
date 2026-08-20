@@ -1,5 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import UiLangRedirect from '../lib/UiLangRedirect';
 
 export default function WorklistsRedirect() {
-  redirect('/en/worklists');
+  return <UiLangRedirect target="/worklists" />;
 }

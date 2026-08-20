@@ -53,6 +53,13 @@ let STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
 
 let worklistState = {};
 
+// จำ XN ที่ "จบงานแล้วในเครื่องนี้" โดยไม่ต้องรอ HIS อัปเดต - ใช้ร่วมกันทั้ง 2 เหตุการณ์ที่ถือว่าจบเหมือนกัน:
+// 1) กดปุ่มยืนยันอ่านฟิล์มจากหน้าเว็บ (manual)  2) เครื่อง X-ray ส่ง MPPS แจ้ง COMPLETED/DISCONTINUED มาเอง (auto)
+// ไม่เขียนกลับ HIS ของโรงพยาบาล เก็บไว้ในเครื่องนี้เท่านั้น
+// ใช้ไฟล์แยกจาก .worklist-state.json เพื่อไม่ให้ปนกับ state ที่ cleanup ตามอายุไฟล์ .wl (retention day) ไปลบทิ้ง
+let LOCALLY_CONFIRMED_FILE = path.join(WORKLIST_DIR, '.locally-confirmed.json');
+let locallyConfirmedXNs = {};
+
 // อายุไฟล์ .wl 
 const WORKLIST_RETENTION_DAYS = 2;
 
@@ -106,6 +113,57 @@ function saveState() {
   }
 }
 
+// โหลด/บันทึกรายชื่อ XN ที่ถือว่าจบงานแล้วในเครื่องนี้ (local เท่านั้น)
+function loadLocallyConfirmedFromDisk() {
+  try {
+    if (fs.existsSync(LOCALLY_CONFIRMED_FILE)) {
+      locallyConfirmedXNs = JSON.parse(fs.readFileSync(LOCALLY_CONFIRMED_FILE, 'utf8'));
+    } else {
+      locallyConfirmedXNs = {};
+    }
+  } catch (err) {
+    console.warn('[DICOM Service] ---> ไม่สามารถอ่านไฟล์ยืนยันจบงานได้:', err.message);
+    locallyConfirmedXNs = {};
+  }
+}
+
+function saveLocallyConfirmed() {
+  try {
+    fs.writeFileSync(LOCALLY_CONFIRMED_FILE, JSON.stringify(locallyConfirmedXNs), 'utf8');
+  } catch (err) {
+    console.warn('[DICOM Service] ---> ไม่สามารถบันทึกไฟล์ยืนยันจบงานได้:', err.message);
+  }
+}
+
+// ใช้ตอน: กดปุ่มยืนยันอ่านฟิล์มจากหน้าเว็บ (manual) หรือเครื่อง X-ray ส่ง MPPS แจ้ง COMPLETED/DISCONTINUED (auto)
+// ทั้งสองแบบถือว่า "จบแล้ว" เหมือนกัน -> จำไว้ในเครื่องแล้วลบไฟล์ .wl ทิ้งทันที (ไม่เขียนกลับ HIS)
+// เก็บเวลาที่กด (ไม่ใช่แค่ true) เพื่อให้ cleanup ไล่ลบทิ้งได้ตามอายุ ไม่งั้นไฟล์นี้จะโตขึ้นเรื่อยๆ ไม่มีที่สิ้นสุด
+function markLocallyConfirmed(xn) {
+  locallyConfirmedXNs[xn] = Date.now();
+  saveLocallyConfirmed();
+  deleteWorklistFile(xn);
+}
+
+function isLocallyConfirmed(xn) {
+  return locallyConfirmedXNs[xn] !== undefined;
+}
+
+// ลบรายชื่อ XN ที่จบงานไว้เกิน WORKLIST_RETENTION_DAYS วันทิ้ง (เคสนั้นเลยช่วงวันที่ query ย้อนหลังไปแล้ว ไม่มีทางถูกดึงมาสร้างไฟล์ซ้ำอีก)
+function cleanupStaleLocallyConfirmed() {
+  const maxAgeMs = WORKLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  let changed = false;
+
+  Object.keys(locallyConfirmedXNs).forEach((xn) => {
+    if (now - locallyConfirmedXNs[xn] > maxAgeMs) {
+      delete locallyConfirmedXNs[xn];
+      changed = true;
+    }
+  });
+
+  if (changed) saveLocallyConfirmed();
+}
+
 // เปลี่ยนโฟลเดอร์เก็บไฟล์ worklist ตามค่าที่ตั้งไว้จากหน้า Settings
 // - ถ้าไม่ได้ระบุกลับไปใช้ค่า default backend/worklists
 // - ถ้าระบุมาใช้ path นั้น รองรับทั้ง path แบบสัมพัทธ์และแบบเต็ม backslash/forward slash
@@ -123,6 +181,8 @@ function setWorklistDir(dirPath) {
   WORKLIST_DIR = resolved;
   STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
   loadStateFromDisk();
+  LOCALLY_CONFIRMED_FILE = path.join(WORKLIST_DIR, '.locally-confirmed.json');
+  loadLocallyConfirmedFromDisk();
   console.log(`[DICOM Service] ---> ใช้งานโฟลเดอร์ worklists ที่: ${WORKLIST_DIR}`);
   return WORKLIST_DIR;
 }
@@ -231,6 +291,8 @@ function cleanupStaleWorklists() {
     if (deletedCount > 0) {
       console.log(`[DICOM Service] ---> [Cleanup] ดำเนินการเสร็จสิ้น พบไฟล์ทั้งหมด ${files.length} ไฟล์ ลบไป ${deletedCount} ไฟล์`);
     }
+
+    cleanupStaleLocallyConfirmed();
   } catch (err) {
     console.warn('[DICOM Service] ---> รัน cleanup ไฟล์ worklist ค้างไม่สำเร็จ:', err.message);
   }
@@ -399,6 +461,7 @@ function deleteWorklistFile(xn) {
 // เตรียมโฟลเดอร์ default ไว้ตั้งแต่ตอนโหลดโมดูล เผื่อยังไม่มีการเรียก setWorklistDir
 ensureDirExists(WORKLIST_DIR);
 loadStateFromDisk();
+loadLocallyConfirmedFromDisk();
 ensureWorklistCleanupForToday();
 
 module.exports = {
@@ -407,5 +470,7 @@ module.exports = {
   cleanupStaleWorklists,
   setWorklistDir,
   getWorklistDir,
-  sanitizeFileName
+  sanitizeFileName,
+  markLocallyConfirmed,
+  isLocallyConfirmed
 };

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { getDictionary, formatDbError } from '../../lib/i18n';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -33,6 +33,7 @@ const DEFAULT_FORM = {
 
 export default function SettingsPage() {
   const { lang: rawLang } = useParams();
+  const router = useRouter();
   const lang = rawLang === 'th' ? 'th' : 'en';
   const fullDict = getDictionary(lang);
   const dict = fullDict.settings;
@@ -224,10 +225,12 @@ export default function SettingsPage() {
     setStatus(dict.savingStatus);
     setStatusType('info');
     try {
+      // เข้ามาที่หน้านี้แล้วกด Save ถือว่าเลือกภาษาเว็บแน่ชัดแล้ว (เผื่อมาจาก bookmark เก่าที่ข้ามหน้าเลือกภาษาไป)
+      const payload = { ...form, mwl: { ...form.mwl, uiLangConfirmed: true } };
       const res = await fetch(`${API_URL}/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       setWorklistDirActive(json.worklistDirActive || '');
@@ -237,6 +240,11 @@ export default function SettingsPage() {
         setStatus(json.message);
       }
       setStatusType(json.success ? 'success' : 'error');
+
+      // ถ้าเปลี่ยนภาษาเว็บไปจากภาษาปัจจุบันของหน้านี้ ให้พาไปหน้าตั้งค่าภาษานั้นทันที
+      if (json.success && form.mwl.lang && form.mwl.lang !== lang) {
+        router.push(`/${form.mwl.lang}/settings`);
+      }
     } catch (err) {
       setStatus(dict.connectErrorPrefix + err.message);
       setStatusType('error');
@@ -249,6 +257,23 @@ export default function SettingsPage() {
     <>
       <h1>{dict.title}</h1>
       <div className={`status status-${statusType}`}>{status}</div>
+
+      <div className="settings-card">
+        <h2>{dict.uiLangSectionTitle}</h2>
+        <div className="settings-grid">
+          <label>
+            {dict.uiLangLabel}
+            <select
+              value={form.mwl.lang || 'en'}
+              onChange={(e) => updateMwl('lang', e.target.value)}
+            >
+              <option value="th">{dict.uiLangThOption}</option>
+              <option value="en">{dict.uiLangEnOption}</option>
+            </select>
+          </label>
+        </div>
+        <p className="field-note">{dict.uiLangNote}</p>
+      </div>
 
       <div className="settings-card">
         <h2>{dict.hisSectionTitle}</h2>

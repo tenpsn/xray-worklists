@@ -288,6 +288,47 @@ tbody tr:hover {
   }
 }
 
+.field-note {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 8px 0 0 0;
+}
+
+/* หน้าเลือกภาษาครั้งแรก */
+.choose-language-page {
+  max-width: 480px;
+  margin: 80px auto;
+  text-align: center;
+}
+
+.choose-language-page p {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.choose-language-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.choose-language-buttons button {
+  min-width: 140px;
+  padding: 14px 24px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: 1px solid #2563eb;
+  background: white;
+  color: #2563eb;
+}
+
+.choose-language-buttons button:hover {
+  background: #2563eb;
+  color: white;
+}
+
 .settings-card {
   background: white;
   border-radius: 6px;

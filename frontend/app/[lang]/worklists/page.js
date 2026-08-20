@@ -49,6 +49,32 @@ export default function Page() {
 
   const isLoadingRef = useRef(false);
 
+  // จำ XN ที่กดปุ่ม "ยืนยันอ่านฟิล์ม" ไปแล้วในหน้านี้ (แค่ระหว่าง session นี้ - ไม่ได้เขียนกลับ HIS
+  // ดังนั้นถ้าค้นหาใหม่ค่า confirm_read_film ที่ได้จาก HIS จะยังเป็น N เหมือนเดิม แต่ไฟล์ .wl จะไม่ถูกสร้างซ้ำแล้วเพราะ backend จำไว้)
+  const [filmConfirmedXNs, setFilmConfirmedXNs] = useState(new Set());
+  const [confirmingXn, setConfirmingXn] = useState(null);
+
+  async function confirmReadFilm(xn) {
+    setConfirmingXn(xn);
+    try {
+      const res = await fetch(`${API_URL}/api/xray-report/confirm-read-film`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xn }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setFilmConfirmedXNs((prev) => new Set(prev).add(xn));
+      } else {
+        setStatus(dict.statusErrorPrefix + dict.confirmFilmError);
+      }
+    } catch (err) {
+      setStatus(dict.statusConnectErrorPrefix + err.message);
+    } finally {
+      setConfirmingXn(null);
+    }
+  }
+
   async function loadData(isManual = false) {
     if (isLoadingRef.current) {
       // กันไม่ให้ยิง request ซ้อน
@@ -208,14 +234,6 @@ export default function Page() {
       <div className="page-header">
         <h1>{dict.pageTitle}</h1>
         <div className="header-actions">
-          <div className="lang-toggle">
-            <Link href="/th/worklists" className={lang === 'th' ? 'active' : ''}>
-              TH
-            </Link>
-            <Link href="/en/worklists" className={lang === 'en' ? 'active' : ''}>
-              ENG
-            </Link>
-          </div>
           <Link className="settings-link" href={`/${lang}`}>{nav.selectSystem}</Link>
           <Link className="settings-link" href={`/${lang}/settings`}>{nav.settingsLink}</Link>
         </div>
@@ -284,10 +302,13 @@ export default function Page() {
               <th>{dict.table.doctor}</th>
               <th>{dict.table.itemCode}</th>
               <th>{dict.table.department}</th>
+              <th>{dict.table.action}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row) => {
+              const isFilmConfirmed = row.confirm_read_film === 'Y' || filmConfirmedXNs.has(row.xn);
+              return (
               <tr key={row.xn}>
                 <td>{row.xn ?? ''}</td>
                 <td>{row.hn ?? ''}</td>
@@ -306,8 +327,21 @@ export default function Page() {
                 <td>{formatDoctorField(row.Doctor, lang)}</td>
                 <td>{row.xray_items_code ?? ''}</td>
                 <td>{row.department_name ?? ''}</td>
+                <td>
+                  {isFilmConfirmed ? (
+                    dict.confirmFilmDone
+                  ) : (
+                    <button
+                      onClick={() => confirmReadFilm(row.xn)}
+                      disabled={confirmingXn === row.xn}
+                    >
+                      {dict.confirmFilmButton}
+                    </button>
+                  )}
+                </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

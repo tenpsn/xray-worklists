@@ -1,5 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import UiLangRedirect from '../lib/UiLangRedirect';
 
 export default function OrthancCleanerRedirect() {
-  redirect('/en/orthanc-cleaner');
+  return <UiLangRedirect target="/orthanc-cleaner" />;
 }

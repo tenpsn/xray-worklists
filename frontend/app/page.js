@@ -1,5 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import UiLangRedirect from './lib/UiLangRedirect';
 
 export default function RootRedirect() {
-  redirect('/en');
+  return <UiLangRedirect target="/" />;
 }

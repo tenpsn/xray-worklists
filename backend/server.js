@@ -48,16 +48,11 @@ app.use(express.json({ limit: '20mb' }));
 // โหลดการตั้งค่า (HIS MWL)
 let currentSettings = settingsService.loadSettings();
 
-// จำ XN ที่ถ่ายเสร็จแล้ว
-const mppsCompletedXNs = new Set();
-
 // เมื่อเครื่อง Modality ส่งสถานะ MPPS กลับมา (ตรวจเสร็จ/ยกเลิก) ให้ลบไฟล์ worklist (.wl) ทิ้ง
+// ใช้ store เดียวกับปุ่ม "ยืนยันอ่านฟิล์ม" ในหน้าเว็บ (ถือว่าจบงานเหมือนกัน) เพื่อให้ทนต่อการ restart backend ได้ - ต่างจาก Set เดิมที่อยู่แค่ในหน่วยความจำ
 function handleMppsStatusChange(accessionNumber, status) {
   if (status === 'COMPLETED' || status === 'DISCONTINUED') {
-    dicomService.deleteWorklistFile(accessionNumber);
-
-    // บันทึก XN ที่เสร็จแล้วลง Set เพื่อให้ระบบจำไว้
-    mppsCompletedXNs.add(accessionNumber);
+    dicomService.markLocallyConfirmed(accessionNumber);
     console.log(`[MPPS] ---> ลบไฟล์ worklist ของ XN: ${accessionNumber} เนื่องจากสถานะเป็น "${status}"`);
   }
 }
@@ -657,25 +652,20 @@ async function processWorklistFiles(records, displayLang) {
           if (record.orderControl === 'CA') {
             // ยกเลิก order จาก HL7 (ORC.1 = CA)
             dicomService.deleteWorklistFile(record.xn);
-            mppsCompletedXNs.delete(safeXn);
-            mppsCompletedXNs.delete(record.xn);
 
-          } else if (record.confirm === 'Y' && record.confirm_read_film === 'Y') {
+          } else if (
+            record.confirm_read_film === 'Y' ||
+            dicomService.isLocallyConfirmed(record.xn) ||
+            dicomService.isLocallyConfirmed(safeXn)
+          ) {
+            // ถือว่าจบงานแล้ว - จาก HIS โดยตรง (confirm_read_film='Y') หรือจบในเครื่องนี้เอง
+            // (กดยืนยันอ่านฟิล์มจากหน้าเว็บ หรือเครื่อง X-ray ส่ง MPPS แจ้ง COMPLETED/DISCONTINUED มา) โดยไม่ต้องรอ HIS อัปเดต
             dicomService.deleteWorklistFile(record.xn);
 
-            // เคลียร์ความจำทิ้งด้วย เพราะกระบวนการจบสมบูรณ์ใน DB แล้ว
-            mppsCompletedXNs.delete(safeXn);
-            mppsCompletedXNs.delete(record.xn);
-
-         } else if (mppsCompletedXNs.has(safeXn) || mppsCompletedXNs.has(record.xn)) {
-            // ถ้าเครื่อง X-ray แจ้ง COMPLETED มาแล้ว ให้ "ข้าม" การสร้างไฟล์
-            // (ไฟล์จะไม่ถูกสร้างใหม่แม้ใน HOSxP/SoftCon จะยังเป็นสถานะ 'N' ก็ตาม)
-
-          } else if (record.confirm === 'N' && record.confirm_read_film === 'N') {
-            // สร้างไฟล์เฉพาะเคส N,N เท่านั้น (ยังไม่ยืนยันผลและยังไม่ยืนยันอ่านฟิล์มทั้งคู่)
+          } else if (record.confirm_read_film === 'N') {
+            // ยังไม่ยืนยันอ่านฟิล์ม (และไม่ได้จบงานในเครื่องนี้) ให้สร้างไฟล์ worklist
             await dicomService.generateWorklistFile(record);
           }
-          // สถานะอื่น (Y,N หรือ N,Y) ไม่ต้องสร้างไฟล์ wl แล้ว
         } catch (err) {
           console.error(`[DICOM Error] ---> ผิดพลาดในการสร้างไฟล์ XN: ${record.xn}`, err);
         }
@@ -785,6 +775,16 @@ app.post('/api/xray-report', async (req, res) => {
   } finally {
     isProcessingXrayReport = false;
   }
+});
+
+// ปุ่ม "ยืนยันอ่านฟิล์ม" จากหน้าเว็บ - จำไว้ในเครื่องนี้เท่านั้น (ไม่เขียนกลับ HIS ของโรงพยาบาล) แล้วลบไฟล์ .wl ทิ้งทันที
+app.post('/api/xray-report/confirm-read-film', (req, res) => {
+  const { xn } = req.body || {};
+  if (!xn) {
+    return res.status(400).json({ success: false, errorCode: 'XN_REQUIRED' });
+  }
+  dicomService.markLocallyConfirmed(String(xn));
+  res.json({ success: true });
 });
 
 // เช็คว่า path ที่ให้มาเป็นของไดรฟ์ Windows หรือไม่ เช่น "D:\" หรือ "D:"

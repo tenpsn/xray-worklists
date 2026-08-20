@@ -19,6 +19,8 @@ const DEFAULT_SETTINGS = {
   },
   mwl: {
     lang: process.env.MWL_LANG === 'th' ? 'th' : 'en',
+    // ยังไม่เคยเลือกภาษาของหน้าเว็บผ่านหน้าแรกเลย - ใช้แยกจาก lang เพราะ lang มีค่า default อยู่แล้วเสมอ แยกไม่ออกว่า "ยังไม่เลือก" กับ "เลือกอังกฤษแล้ว"
+    uiLangConfirmed: false,
     aet: process.env.MWL_AET || 'ORTHANC',
     port: process.env.MWL_PORT || '4242',
     mppsPort: process.env.MPPS_PORT || '7001', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality

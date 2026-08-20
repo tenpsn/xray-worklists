@@ -43,6 +43,9 @@ const dictionaries = {
       errorDbNotConfigured: 'Database connection is not configured yet. Please go to the Settings menu.',
       statusSummary: ({ total, newCount, updateCount }) =>
         `Showing ${total} records (New: ${newCount} | Updated: ${updateCount})`,
+      confirmFilmButton: 'Confirm film read',
+      confirmFilmDone: 'Confirmed',
+      confirmFilmError: 'Failed to confirm, please try again',
       table: {
         prefix: 'Prefix',
         firstName: 'First name',
@@ -58,6 +61,7 @@ const dictionaries = {
         doctor: 'Doctor',
         itemCode: 'Item code',
         department: 'Department',
+        action: 'Action',
       },
     },
     settings: {
@@ -66,6 +70,11 @@ const dictionaries = {
       statusLoaded: 'Current settings loaded',
       statusLoadFailed: 'Failed to load settings',
       connectErrorPrefix: 'Cannot connect to server: ',
+      uiLangSectionTitle: 'Website Language',
+      uiLangLabel: 'Language',
+      uiLangNote: 'Also used as the default language for auto-generated worklist (.wl) files.',
+      uiLangThOption: 'Thai',
+      uiLangEnOption: 'English',
       hisSectionTitle: 'HIS — Database',
       mwlSectionTitle: 'MWL — DICOM Modality Worklist',
       hisSystemLabel: 'HIS System',
@@ -205,6 +214,9 @@ const dictionaries = {
       errorDbNotConfigured: 'ยังไม่ได้ตั้งค่าการเชื่อมต่อฐานข้อมูล กรุณาไปที่เมนูตั้งค่าระบบ',
       statusSummary: ({ total, newCount, updateCount }) =>
         `แสดงข้อมูลรวม ${total} รายการ (พบใหม่: ${newCount} | อัปเดต: ${updateCount})`,
+      confirmFilmButton: 'ยืนยันอ่านฟิล์ม',
+      confirmFilmDone: 'ยืนยันแล้ว',
+      confirmFilmError: 'ยืนยันไม่สำเร็จ กรุณาลองใหม่',
       table: {
         prefix: 'คำนำหน้า',
         firstName: 'ชื่อ',
@@ -220,6 +232,7 @@ const dictionaries = {
         doctor: 'แพทย์',
         itemCode: 'รหัสรายการ',
         department: 'แผนก',
+        action: 'การดำเนินการ',
       },
     },
     settings: {
@@ -228,6 +241,11 @@ const dictionaries = {
       statusLoaded: 'โหลดการตั้งค่าปัจจุบันเรียบร้อย',
       statusLoadFailed: 'โหลดการตั้งค่าไม่สำเร็จ',
       connectErrorPrefix: 'เชื่อมต่อ server ไม่ได้: ',
+      uiLangSectionTitle: 'ภาษาของหน้าเว็บ',
+      uiLangLabel: 'ภาษา',
+      uiLangNote: 'ใช้เป็นภาษาเริ่มต้นของไฟล์ worklist (.wl) ที่สร้างอัตโนมัติด้วย',
+      uiLangThOption: 'ไทย',
+      uiLangEnOption: 'อังกฤษ',
       hisSectionTitle: 'HIS — Database',
       mwlSectionTitle: 'MWL — DICOM Modality Worklist',
       hisSystemLabel: 'ระบบ HIS',
