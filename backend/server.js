@@ -671,10 +671,11 @@ async function processWorklistFiles(records, displayLang) {
             // ถ้าเครื่อง X-ray แจ้ง COMPLETED มาแล้ว ให้ "ข้าม" การสร้างไฟล์
             // (ไฟล์จะไม่ถูกสร้างใหม่แม้ใน HOSxP/SoftCon จะยังเป็นสถานะ 'N' ก็ตาม)
 
-          } else {
-            // ถ้าหมอยังไม่ยืนยัน และเครื่อง X-ray ยังไม่ได้ถ่าย ถึงจะยอมสร้างไฟล์
+          } else if (record.confirm === 'N' && record.confirm_read_film === 'N') {
+            // สร้างไฟล์เฉพาะเคส N,N เท่านั้น (ยังไม่ยืนยันผลและยังไม่ยืนยันอ่านฟิล์มทั้งคู่)
             await dicomService.generateWorklistFile(record);
           }
+          // สถานะอื่น (Y,N หรือ N,Y) ไม่ต้องสร้างไฟล์ wl แล้ว
         } catch (err) {
           console.error(`[DICOM Error] ---> ผิดพลาดในการสร้างไฟล์ XN: ${record.xn}`, err);
         }

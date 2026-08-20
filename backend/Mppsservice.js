@@ -9,7 +9,7 @@ const dcmjsDimse = require('dcmjs-dimse');
 // เก็บไว้ในโฟลเดอร์ logs/ แยกต่างหาก หมุนไฟล์ตาม "วัน" เก็บย้อนหลังตาม LOG_RETENTION_DAYS วัน เกินนี้ลบทิ้งอัตโนมัติ
 const LOG_DIR = path.join(__dirname, 'logs');
 const LOG_PREFIX = 'dicom-network';
-const LOG_RETENTION_DAYS = 7; // เก็บ log ย้อนหลัง 7 วัน 
+const LOG_RETENTION_DAYS = 2; // เก็บ log ย้อนหลัง 2 วัน
 const LOG_FILE_PATTERN = new RegExp(`^${LOG_PREFIX}-\\d{4}-\\d{2}-\\d{2}\\.log$`);
 
 // ตรวจสอบว่ามีโฟลเดอร์ logs หรือยัง ถ้ายังไม่มีให้สร้างขึ้นมา

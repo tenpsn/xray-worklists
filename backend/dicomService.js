@@ -54,7 +54,7 @@ let STATE_FILE = path.join(WORKLIST_DIR, '.worklist-state.json');
 let worklistState = {};
 
 // อายุไฟล์ .wl 
-const WORKLIST_RETENTION_DAYS = 7;
+const WORKLIST_RETENTION_DAYS = 2;
 
 // เก็บวันที่ (YYYY-MM-DD) ของครั้งล่าสุดที่รัน cleanup
 let lastWorklistCleanupDateKey = null;

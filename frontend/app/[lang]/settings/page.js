@@ -63,7 +63,7 @@ export default function SettingsPage() {
         if (json.success) {
           setForm({
             his: { ...DEFAULT_FORM.his, ...json.settings.his },
-            mwl: { ...DEFAULT_FORM.mwl, ...json.settings.mwl },
+            mwl: { ...DEFAULT_FORM.mwl, ...json.settings.mwl, modalityAlwaysAllow: true },
           });
           setWorklistDirActive(json.worklistDirActive || '');
           setStatus(dict.statusLoaded);
@@ -376,6 +376,11 @@ export default function SettingsPage() {
             />
           </label>
 
+          {/*
+            ซ่อนตัวเลือก Allow any / Whitelist ไว้ก่อน ใช้ "Allow any X-ray machine" ไปก่อน
+            (modalityAlwaysAllow บังคับ true ตอนโหลด ด้านบนใน useEffect)
+            ถ้าจะเปิดกลับมาใช้ ให้เอาโค้ดด้านล่างนี้กลับมา:
+
           <label style={{ gridColumn: '1 / -1' }}>
             {dict.modalityAlwaysAllowLabel}
             <select
@@ -422,6 +427,7 @@ export default function SettingsPage() {
               <button type="button" onClick={addModalityRow}>{dict.addModalityButton}</button>
             </div>
           )}
+          */}
 
           <label style={{ gridColumn: '1 / -1' }}>
             {dict.worklistDirLabel}

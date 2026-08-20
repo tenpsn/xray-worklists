@@ -5,15 +5,23 @@ const ORTHANC_CONFIG_PATH = path.join(__dirname, 'orthanc-config', 'orthanc.json
 
 // docker-compose.yml อยู่ที่ root ของโปรเจกต์ (นอก /app) ต้องอ้อมผ่าน /mnt/hostX เหมือน toOrthancPath
 // PROJECT_HOST_PATH มาจาก setup.bat (Windows, เช่น "D:\xray-worklists") หรือ setup.sh (Linux, เช่น "/root/xray-worklists")
+// ต้องเลือกชื่อไฟล์ compose ให้ตรงกับ OS ด้วย เพราะ setup.sh ใช้ docker-compose.linux.yml คนละไฟล์กับ Windows
+// (เดารูปแบบ path ของ PROJECT_HOST_PATH เอา เพราะ backend รันในคอนเทนเนอร์ Linux เสมอ ไม่รู้ host OS จริงตรงๆ)
+function getDockerComposeFileName() {
+  const projectHostPath = (process.env.PROJECT_HOST_PATH || '').trim();
+  return projectHostPath.startsWith('/') ? 'docker-compose.linux.yml' : 'docker-compose.yml';
+}
+
 function getDockerComposeHostPath() {
   const projectHostPath = (process.env.PROJECT_HOST_PATH || '').trim();
+  const composeFileName = getDockerComposeFileName();
   if (/^[a-zA-Z]:\\/.test(projectHostPath)) {
     const drive = projectHostPath[0].toUpperCase();
     const restOfProjectPath = projectHostPath.slice(2).replace(/\\/g, '/');
-    return `/mnt/host${drive}${restOfProjectPath}/docker-compose.yml`;
+    return `/mnt/host${drive}${restOfProjectPath}/${composeFileName}`;
   }
   if (projectHostPath.startsWith('/')) {
-    return `/mnt/hostRoot${projectHostPath}/docker-compose.yml`;
+    return `/mnt/hostRoot${projectHostPath}/${composeFileName}`;
   }
   return null;
 }

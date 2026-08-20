@@ -18,17 +18,17 @@ export default function Page() {
   // อ่านค่า filter ที่บันทึกไว้จาก sessionStorage เพราะสลับภาษาแล้วหน้านี้ remount ใหม่ ค่าจากหน้าเว็บก่อนหน้าจะหายถ้าไม่เก็บไว้
   // ใช้ sessionStorage ไม่ใช่ localStorage เพื่อให้เปิด tab/session ใหม่แล้วเริ่มที่ค่า default เสมอ
   function loadSavedFilters() {
-    if (typeof window === 'undefined') return { dateback: 1, include: '', exclude: '', confirm: false };
+    if (typeof window === 'undefined') return { dateback: 1, include: '', exclude: '', confirm: true };
     try {
       const saved = JSON.parse(window.sessionStorage.getItem('worklistFilters'));
       return {
         dateback: Number(saved?.dateback) > 0 ? Number(saved.dateback) : 1,
         include: saved?.include || '',
         exclude: saved?.exclude || '',
-        confirm: saved?.confirm === true,
+        confirm: saved?.confirm !== false,
       };
     } catch {
-      return { dateback: 1, include: '', exclude: '', confirm: false };
+      return { dateback: 1, include: '', exclude: '', confirm: true };
     }
   }
 
