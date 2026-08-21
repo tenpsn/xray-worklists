@@ -321,7 +321,7 @@ export default function Page() {
                 <td>{row.StudyTime ?? ''}</td>
                 <td>{row.xray_items_group ?? ''}</td>
                 <td>{row.confirm ?? ''}</td>
-                <td>{row.confirm_read_film ?? ''}</td>
+                <td>{isFilmConfirmed ? 'Y' : (row.confirm_read_film ?? '')}</td>
                 <td>{formatDoctorField(row.Doctor, lang)}</td>
                 <td>{row.xray_items_code ?? ''}</td>
                 <td>{row.department_name ?? ''}</td>

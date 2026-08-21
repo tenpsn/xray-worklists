@@ -759,6 +759,9 @@ app.post('/api/xray-report', async (req, res) => {
 
     records.forEach((record) => {
       record.lang = displayLang;
+      if (record.confirm_read_film !== 'Y' && dicomService.isLocallyConfirmed(record.xn)) {
+        record.confirm_read_film = 'Y';
+      }
     });
 
     res.json({ success: true, count: records.length, data: records });

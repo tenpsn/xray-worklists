@@ -11,6 +11,7 @@
   "DicomAlwaysAllowFindWorklist": true,
   "DicomCheckModalityHost": false,
   "DicomModalities": {},
+  "DefaultEncoding": "Utf8",
   "Worklists": {
     "Enable": true,
     "Database": "/mnt/hostRoot/Users/ch.nattapong/Gd4/xray-worklists/backend/worklists"
