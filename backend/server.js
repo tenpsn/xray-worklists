@@ -321,6 +321,28 @@ function mapHl7RowsToRecords(rows, encoding) {
   return records;
 }
 
+// ทั้ง HOSxP และ SoftCon มีตาราง lookup แยกประเภทรายการอยู่แล้วในฐานข้อมูลเอง ไม่ต้องให้ผู้ใช้มาจับคู่เอง
+// ใช้เลข group/category ที่ query มาพร้อม record (xray_items_group) แปลงตรง ๆ ได้เลย ตาม hisSystem ที่ต่ออยู่
+// - HOSxP: ตาราง "xray_items_group" (1=X-Ray, 2=Ultrasound, 3=CT, 4=MRI, 5=Mammogram, 6=EKG)
+// - SoftCon: ตาราง "RadItemCategory" (10=CT SCAN, 20=MRI, 40=ULTRASOUND, 50=X-RAY, 80=MAMMOGRAM)
+//   ไม่มี category ECG ในตารางนี้ (ECG ไม่ได้อยู่ใน catalog รังสีของ SoftCon) และ DENTAL(60)/ESWL(70)/Bone density(217883)
+//   ไม่ใช่ 1 ใน 6 modality เป้าหมาย เลยไม่ใส่ไว้ในตาราง ปล่อยให้ fallback เป็น CR เหมือนของที่ map ไม่เจอ
+const MODALITY_LOOKUP_BY_HIS = {
+  hosxp: { 1: 'CR', 2: 'US', 3: 'CT', 4: 'MR', 5: 'MG', 6: 'ECG' },
+  softcon: { 10: 'CT', 20: 'MR', 40: 'US', 50: 'CR', 80: 'MG' },
+};
+
+// เติมค่า Modality ให้แต่ละ record จาก xray_items_group
+// HL7 ไม่มีข้อมูล group นี้ (query คืนค่าว่างเสมอ) เลยปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
+function applyModalityMapping(records) {
+  const lookup = MODALITY_LOOKUP_BY_HIS[currentSettings.his.hisSystem] || {};
+  records.forEach((record) => {
+    const resolved = lookup[Number(record.xray_items_group)];
+    if (resolved) record.Modality = resolved;
+  });
+  return records;
+}
+
 // SoftCon - schema แบบ RadRequestHeader/RadRequest/Patient/Person/Visit
 function buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbType, xns_NN = [], xns_YN = [], xns_NY = []) {
   const state = { params: [], paramIndex: 1 };
@@ -364,17 +386,17 @@ function buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbT
         WHEN p.GenderKey = -2 THEN '2' 
         ELSE CAST(p.GenderKey AS ${genderCastType})
       END as sex,
-      rr.ItemName as xraylist, 
-      ${studyDateExpr} as "StudyDate", 
+      rr.ItemName as xraylist,
+      ${studyDateExpr} as "StudyDate",
       ${studyTimeExpr} as "StudyTime",
-      '' as xray_items_group,
+      ric.RadItemCategoryKey as xray_items_group,
       -- SoftCon มี flag เดียว (IsDone) ไม่แยก 2 ขั้นแบบ HOSxP เลยใช้ค่าเดียวกันแทนทั้งคู่
       CASE WHEN rrh.IsDone = 1 THEN 'Y' ELSE 'N' END as confirm,
       CASE WHEN rrh.IsDone = 1 THEN 'Y' ELSE 'N' END as confirm_read_film,
       LTRIM(CONCAT(tdoc.ShortName, ' ', pd.FirstName, ' ', pd.LastName)) as Doctor,
-      rr.ItemKey as xray_items_code, 
+      rr.ItemKey as xray_items_code,
       '' as Modality,
-      '' as stuid, 
+      '' as stuid,
       rr.IssueServiceUnitKey as department_name
     FROM RadRequestHeader rrh
     INNER JOIN RadRequest rr ON rrh.RadRequestHeaderKey = rr.RadRequestHeaderKey
@@ -385,6 +407,9 @@ function buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbT
     LEFT JOIN Employee doc ON rrh.IssueDoctorKey = doc.EmployeeKey
     LEFT JOIN Person pd ON doc.EmployeeKey = pd.PersonKey
     LEFT JOIN Title tdoc ON pd.TitleKey = tdoc.TitleKey
+    -- RadItem/RadItemCategory คือตาราง lookup ของ SoftCon เอง บอกว่ารายการนี้เป็น CT SCAN/MRI/ULTRASOUND/X-RAY/MAMMOGRAM ฯลฯ (เทียบเท่า xray_items_group ของ HOSxP)
+    LEFT JOIN RadItem ri ON rr.ItemKey = ri.ItemKey
+    LEFT JOIN RadItemCategory ric ON ri.RadItemCategoryKey = ric.RadItemCategoryKey
     WHERE ${dateWindow}
   `;
   state.params.push(safeDateback);
@@ -706,6 +731,7 @@ async function runAutoWorklistCycle() {
     const records = currentSettings.his.hisSystem === 'hl7'
       ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
       : result.rows;
+    applyModalityMapping(records);
     if (records.length > 0) {
       await processWorklistFiles(records, currentSettings.mwl.lang);
     }
@@ -756,6 +782,7 @@ app.post('/api/xray-report', async (req, res) => {
     const records = currentSettings.his.hisSystem === 'hl7'
       ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
       : result.rows;
+    applyModalityMapping(records);
 
     records.forEach((record) => {
       record.lang = displayLang;

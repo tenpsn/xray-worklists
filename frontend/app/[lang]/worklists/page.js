@@ -295,6 +295,7 @@ export default function Page() {
               <th>{dict.table.studyDate}</th>
               <th>{dict.table.studyTime}</th>
               <th>{dict.table.group}</th>
+              <th>{dict.table.modality}</th>
               <th>{dict.table.confirmResult}</th>
               <th>{dict.table.confirmFilm}</th>
               <th>{dict.table.doctor}</th>
@@ -320,6 +321,7 @@ export default function Page() {
                 <td>{row.StudyDate ?? ''}</td>
                 <td>{row.StudyTime ?? ''}</td>
                 <td>{row.xray_items_group ?? ''}</td>
+                <td>{row.Modality ?? ''}</td>
                 <td>{row.confirm ?? ''}</td>
                 <td>{isFilmConfirmed ? 'Y' : (row.confirm_read_film ?? '')}</td>
                 <td>{formatDoctorField(row.Doctor, lang)}</td>
