@@ -322,37 +322,48 @@ function mapHl7RowsToRecords(rows, encoding) {
 }
 
 // ทั้ง HOSxP และ SoftCon มีตาราง lookup แยกประเภทรายการอยู่แล้วในฐานข้อมูลเอง ไม่ต้องให้ผู้ใช้มาจับคู่เอง
-// ใช้เลข group/category ที่ query มาพร้อม record (xray_items_group) แปลงตรง ๆ ได้เลย ตาม hisSystem ที่ต่ออยู่
-// - HOSxP: ตาราง "xray_items_group" (1=X-Ray, 2=Ultrasound, 3=CT, 4=MRI, 5=Mammogram, 6=EKG)
-// - SoftCon: ตาราง "RadItemCategory" (10=CT SCAN, 20=MRI, 40=ULTRASOUND, 50=X-RAY, 80=MAMMOGRAM)
-//   ไม่มี category ECG ในตารางนี้ (ECG ไม่ได้อยู่ใน catalog รังสีของ SoftCon) และ DENTAL(60)/ESWL(70)/Bone density(217883)
-//   ไม่ใช่ 1 ใน 6 modality เป้าหมาย เลยไม่ใส่ไว้ในตาราง ปล่อยให้ fallback เป็น CR เหมือนของที่ map ไม่เจอ
-const MODALITY_LOOKUP_BY_HIS = {
-  hosxp: { 1: 'CR', 2: 'US', 3: 'CT', 4: 'MR', 5: 'MG', 6: 'ECG' },
-  softcon: { 10: 'CT', 20: 'MR', 40: 'US', 50: 'CR', 80: 'MG' },
-};
-
-// กำหนด Modality ให้แต่ละ record จาก xray_items_group โชว์ในหน้า settings ให้แก้ไขทับค่าได้
-// เพราะเลข group พวกนี้เป็นแค่ "ข้อมูล" ในฐานข้อมูลของ รพ.นั้น ๆ ไม่ใช่มาตรฐานตายตัว รพ.อื่นอาจตั้งเลขไม่ตรงกัน
 const MODALITY_GROUP_CATALOG_QUERY = {
   hosxp: 'SELECT xray_items_group AS id, name FROM xray_items_group ORDER BY xray_items_group',
   softcon: 'SELECT RadItemCategoryKey AS id, Name AS name FROM RadItemCategory ORDER BY RadItemCategoryKey',
 };
 
-// หา modality ที่ควรใช้สำหรับ group ค่าที่แก้ทับไว้ในหน้า settings มาก่อน ถ้าไม่มีค่อยใช้ค่าจาก HIS
-function resolveModalityForGroup(hisSystem, groupId) {
+const MODALITY_NAME_MATCH = {
+  CR: ['X-RAY', 'XRAY', 'X RAY', 'PLAIN FILM'],
+  US: ['ULTRASOUND', 'U/S'],
+  CT: ['CT', 'CT SCAN', 'COMPUTED TOMOGRAPHY'],
+  MR: ['MRI', 'MR', 'MAGNETIC RESONANCE', 'MAGNETIC RESONANCE IMAGING'],
+  MG: ['MAMMOGRAM', 'MAMMOGRAPHY'],
+  ECG: ['EKG', 'ECG', 'ELECTROCARDIOGRAM'],
+};
+
+// modality จากชื่อ group แบบตรงเท่านั้น ไม่เจอที่ตรงกัน = คืนค่าว่าง
+function guessModalityFromName(name) {
+  const normalized = String(name || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  for (const [modality, labels] of Object.entries(MODALITY_NAME_MATCH)) {
+    if (labels.includes(normalized)) return modality;
+  }
+  return '';
+}
+
+function resolveModalityForGroup(hisSystem, groupId, groupName) {
   const override = (currentSettings.mwl.modalityGroupOverride || {})[hisSystem] || {};
   const overridden = override[String(groupId)];
   if (overridden) return overridden;
-  const builtIn = MODALITY_LOOKUP_BY_HIS[hisSystem] || {};
-  return builtIn[Number(groupId)] || '';
+  return guessModalityFromName(groupName);
 }
 
-// HL7 ไม่มีข้อมูล group นี้ (query คืนค่าว่างเสมอ) เลยปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
-function applyModalityMapping(records) {
+// HL7 ไม่มีตาราง lookup เลยปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
+async function applyModalityMapping(records) {
   const hisSystem = currentSettings.his.hisSystem;
+  const catalogQuery = MODALITY_GROUP_CATALOG_QUERY[hisSystem];
+  if (!catalogQuery) return records;
+
+  const catalogResult = await db.query(catalogQuery);
+  const nameById = {};
+  catalogResult.rows.forEach((r) => { nameById[String(r.id)] = r.name; });
+
   records.forEach((record) => {
-    const resolved = resolveModalityForGroup(hisSystem, record.xray_items_group);
+    const resolved = resolveModalityForGroup(hisSystem, record.xray_items_group, nameById[String(record.xray_items_group)]);
     if (resolved) record.Modality = resolved;
   });
   return records;
@@ -569,7 +580,7 @@ app.get('/api/settings/modality-groups', async (req, res) => {
     const groups = result.rows.map((r) => ({
       id: r.id,
       name: r.name,
-      modality: resolveModalityForGroup(hisConfig.hisSystem, r.id),
+      modality: resolveModalityForGroup(hisConfig.hisSystem, r.id, r.name),
     }));
     res.json({ success: true, groups });
   } catch (err) {
@@ -770,7 +781,7 @@ async function runAutoWorklistCycle() {
     const records = currentSettings.his.hisSystem === 'hl7'
       ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
       : result.rows;
-    applyModalityMapping(records);
+    await applyModalityMapping(records);
     if (records.length > 0) {
       await processWorklistFiles(records, currentSettings.mwl.lang);
     }
@@ -821,7 +832,7 @@ app.post('/api/xray-report', async (req, res) => {
     const records = currentSettings.his.hisSystem === 'hl7'
       ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
       : result.rows;
-    applyModalityMapping(records);
+    await applyModalityMapping(records);
 
     records.forEach((record) => {
       record.lang = displayLang;
