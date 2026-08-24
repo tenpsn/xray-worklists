@@ -325,7 +325,7 @@ async function generateWorklistFile(item) {
       const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
 
       // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
-      const patientName = `${lastName}^${firstName}`;
+      const patientName = `${firstName}^${lastName}`;
 
       // รหัสรายการ (xray_items_code) ใช้ทั้งใน RequestedProcedureID และ ScheduledProtocolCodeSequence>CodeValue
       const procedureCode = item.xray_items_code || '';
