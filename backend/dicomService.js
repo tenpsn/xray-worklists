@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const romanizeModule = require('@dehoist/romanize-thai');
 const romanize = typeof romanizeModule === 'function' ? romanizeModule : romanizeModule.default;
+const { loadSettings } = require('./settingsService');
 
 // คำนำหน้าของแพทย์/ผู้ป่วยที่ไม่ต้องแปลงเป็นอังกฤษ
 const PREFIX_PATTERN = /^(ว่าที่\s*)?(พญ|นพ|ทพ|ทพญ|นางสาว|นาง|นาย|ดร|ผศ|รศ|ศ|น\.ส|(?:[ก-ฮ]+\.\s*)+(?:หญิง)?)\.?\s*/;
@@ -206,6 +207,7 @@ function computeItemHash(item) {
     xraylist: item.xraylist,
     xray_items_code: item.xray_items_code,
     lang: item.lang === 'en' ? 'en' : 'th',
+    stationAet: loadSettings().mwl.aet || 'ORTHANC',
   };
   return crypto.createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
 }
@@ -354,6 +356,7 @@ async function generateWorklistFile(item) {
       const studyTime = formatDicomTime(item.StudyTime);
       const dob = formatDicomDate(item.birthday);
       const sex = item.sex === '1' ? 'M' : item.sex === '2' ? 'F' : 'O';
+      const stationAet = loadSettings().mwl.aet || 'ORTHANC';
 
       // ตัวอย่างข้อมูล รูปแบบไฟล์ .dump
       const dumpContent = `
@@ -368,7 +371,7 @@ async function generateWorklistFile(item) {
 (0040,1001) SH [${procedureCode}] # Requested Procedure ID
 (0040,0100) SQ
   (FFFE,E000) na
-    (0040,0001) AE [ORTHANC] # Scheduled Station AE Title
+    (0040,0001) AE [${stationAet}] # Scheduled Station AE Title
     (0040,0002) DA [${studyDate}] # Scheduled Procedure Step Start Date
     (0040,0003) TM [${studyTime}] # Scheduled Procedure Step Start Time
     (0008,0060) CS [${item.Modality || 'CR'}] # Modality

@@ -22,6 +22,7 @@ const DEFAULT_FORM = {
     mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
     modalityAlwaysAllow: true, // true = allow ทุกเครื่อง query worklist ได้ (ค่าเริ่มต้น), false = ต้องลงทะเบียนเครื่องใน modalities เท่านั้น
     modalities: [], // [{ aet, ip, port }] ใช้ตอน modalityAlwaysAllow เป็น false เท่านั้น เพิ่มได้หลายแถว
+    modalityGroupOverride: {}, // { [hisSystem]: { [groupId]: modality } } แก้ทับค่าเดา built-in ของแต่ละ group
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
@@ -43,6 +44,10 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [worklistDirActive, setWorklistDirActive] = useState('');
   const [detecting, setDetecting] = useState(false);
+
+  // รายชื่อ group/category จริงจาก HIS ที่ต่ออยู่ + modality ที่ระบบใช้อยู่ตอนนี้
+  const [modalityGroups, setModalityGroups] = useState([]);
+  const [modalityGroupsNote, setModalityGroupsNote] = useState('');
 
   // state สำหรับหน้าต่างเลือกโฟลเดอร์ worklists
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -78,6 +83,27 @@ export default function SettingsPage() {
     }
     loadSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadModalityGroups() {
+    try {
+      const res = await fetch(`/api/settings/modality-groups`);
+      const json = await res.json();
+      if (json.success) {
+        setModalityGroups(json.groups || []);
+        setModalityGroupsNote(json.groups && json.groups.length === 0 ? dict.modalityGroupNoGroupsNote : '');
+      } else {
+        setModalityGroups([]);
+        setModalityGroupsNote(dict.modalityGroupLoadFailedNote);
+      }
+    } catch (err) {
+      setModalityGroups([]);
+      setModalityGroupsNote(dict.modalityGroupLoadFailedNote);
+    }
+  }
+
+  useEffect(() => {
+    loadModalityGroups();
   }, []);
 
   function updateHis(field, value) {
@@ -126,6 +152,24 @@ export default function SettingsPage() {
       mwl: {
         ...prev.mwl,
         modalities: prev.mwl.modalities.map((m, i) => (i === index ? { ...m, [field]: value } : m)),
+      },
+    }));
+  }
+
+  // แก้ modality ของ group
+  function updateModalityGroupRow(id, modality) {
+    setModalityGroups((prev) => prev.map((g) => (g.id === id ? { ...g, modality } : g)));
+    setForm((prev) => ({
+      ...prev,
+      mwl: {
+        ...prev.mwl,
+        modalityGroupOverride: {
+          ...prev.mwl.modalityGroupOverride,
+          [prev.his.hisSystem]: {
+            ...(prev.mwl.modalityGroupOverride[prev.his.hisSystem] || {}),
+            [String(id)]: modality,
+          },
+        },
       },
     }));
   }
@@ -238,6 +282,11 @@ export default function SettingsPage() {
         setStatus(json.message);
       }
       setStatusType(json.success ? 'success' : 'error');
+
+      // ดึงรายการกลุ่ม modality ใหม่ให้ตรงกับ HIS
+      if (json.success) {
+        await loadModalityGroups();
+      }
 
       // ถ้าเปลี่ยนภาษาเว็บไปจากภาษาปัจจุบันของหน้านี้ ให้พาไปหน้าตั้งค่าภาษานั้นทันที
       if (json.success && form.mwl.lang && form.mwl.lang !== lang) {
@@ -488,6 +537,41 @@ export default function SettingsPage() {
             />
           </label>
         </div>
+      </div>
+
+      <div className="settings-card">
+        <h2>{dict.modalityGroupSectionTitle}</h2>
+        <p className="field-note">{dict.modalityGroupHint}</p>
+        {modalityGroupsNote && <p className="field-note" style={{ color: '#b91c1c' }}>{modalityGroupsNote}</p>}
+        {modalityGroups.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {modalityGroups.map((g) => (
+              <div key={g.id} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ width: '260px', fontSize: '13px', color: '#444' }}>{g.id} - {g.name}</div>
+                <select
+                  value={g.modality}
+                  onChange={(e) => updateModalityGroupRow(g.id, e.target.value)}
+                  style={{
+                    fontFamily: 'inherit',
+                    fontSize: '13px',
+                    padding: '6px 8px',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    background: 'white',
+                  }}
+                >
+                  <option value="">--</option>
+                  <option value="CR">CR</option>
+                  <option value="US">US</option>
+                  <option value="CT">CT</option>
+                  <option value="MR">MR</option>
+                  <option value="MG">MG</option>
+                  <option value="ECG">ECG</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="settings-actions">

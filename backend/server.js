@@ -332,12 +332,27 @@ const MODALITY_LOOKUP_BY_HIS = {
   softcon: { 10: 'CT', 20: 'MR', 40: 'US', 50: 'CR', 80: 'MG' },
 };
 
-// เติมค่า Modality ให้แต่ละ record จาก xray_items_group
+// กำหนด Modality ให้แต่ละ record จาก xray_items_group โชว์ในหน้า settings ให้แก้ไขทับค่าได้
+// เพราะเลข group พวกนี้เป็นแค่ "ข้อมูล" ในฐานข้อมูลของ รพ.นั้น ๆ ไม่ใช่มาตรฐานตายตัว รพ.อื่นอาจตั้งเลขไม่ตรงกัน
+const MODALITY_GROUP_CATALOG_QUERY = {
+  hosxp: 'SELECT xray_items_group AS id, name FROM xray_items_group ORDER BY xray_items_group',
+  softcon: 'SELECT RadItemCategoryKey AS id, Name AS name FROM RadItemCategory ORDER BY RadItemCategoryKey',
+};
+
+// หา modality ที่ควรใช้สำหรับ group ค่าที่แก้ทับไว้ในหน้า settings มาก่อน ถ้าไม่มีค่อยใช้ค่าจาก HIS
+function resolveModalityForGroup(hisSystem, groupId) {
+  const override = (currentSettings.mwl.modalityGroupOverride || {})[hisSystem] || {};
+  const overridden = override[String(groupId)];
+  if (overridden) return overridden;
+  const builtIn = MODALITY_LOOKUP_BY_HIS[hisSystem] || {};
+  return builtIn[Number(groupId)] || '';
+}
+
 // HL7 ไม่มีข้อมูล group นี้ (query คืนค่าว่างเสมอ) เลยปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
 function applyModalityMapping(records) {
-  const lookup = MODALITY_LOOKUP_BY_HIS[currentSettings.his.hisSystem] || {};
+  const hisSystem = currentSettings.his.hisSystem;
   records.forEach((record) => {
-    const resolved = lookup[Number(record.xray_items_group)];
+    const resolved = resolveModalityForGroup(hisSystem, record.xray_items_group);
     if (resolved) record.Modality = resolved;
   });
   return records;
@@ -536,6 +551,30 @@ app.get('/api/settings', (req, res) => {
     settings: maskSecrets(currentSettings),
     worklistDirActive: toDisplayPath(dicomService.getWorklistDir()), // path จริงที่ใช้งานอยู่ตอนนี้ (เผื่อฟิลด์ว่างไว้แล้วใช้ค่า default)
   });
+});
+
+// ดึงรายชื่อ group/category จริงจากฐานข้อมูล HIS ที่ต่ออยู่ (เช่น "1 - X-Ray", "10 - CT SCAN")
+// พร้อม modality ที่ระบบจะใช้จริงตอนนี้ ให้หน้า settings เอาไปโชว์ให้แก้ทับได้
+app.get('/api/settings/modality-groups', async (req, res) => {
+  const hisConfig = currentSettings.his || {};
+  if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
+    return res.status(400).json({ success: false, errorCode: 'DB_NOT_CONFIGURED' });
+  }
+  const catalogQuery = MODALITY_GROUP_CATALOG_QUERY[hisConfig.hisSystem];
+  if (!catalogQuery) {
+    return res.json({ success: true, groups: [] });
+  }
+  try {
+    const result = await db.query(catalogQuery);
+    const groups = result.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      modality: resolveModalityForGroup(hisConfig.hisSystem, r.id),
+    }));
+    res.json({ success: true, groups });
+  } catch (err) {
+    res.status(500).json({ success: false, ...db.friendlyErrorCode(err) });
+  }
 });
 
 function reconcileSecrets(incoming, existing) {

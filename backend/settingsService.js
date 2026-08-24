@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS = {
     // false = ปิดหมด ต้องลงทะเบียนเครื่อง Modality ทีละแถวใน modalities ด้านล่างเท่านั้นถึงจะ query ได้
     modalityAlwaysAllow: true,
     modalities: [], // [{ aet, ip, port }] รายการเครื่อง Modality ที่ลงทะเบียนไว้ (ลงทะเบียนใน DicomModalities), เพิ่มได้หลายแถว
+    // groupId: modality แก้ทับค่าเดา built-in ตอนที่ รพ.นี้ตั้งเลข group ใน HIS ไม่ตรงกับที่โค้ดเดาไว้
+    modalityGroupOverride: {},
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
     autoGenerate: {
       intervalSec: Number(process.env.AUTO_GENERATE_INTERVAL_SEC) || 10,
