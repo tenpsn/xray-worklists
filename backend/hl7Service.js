@@ -15,6 +15,12 @@ function parsehl7DateTime(ts) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// แปลง Date ให้เป็นรูปแบบ HL7 TS (yyyyMMddHHmmss) สำหรับสร้างข้อความส่งออก
+function formatHl7DateTime(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
 // ฟังก์ชันแกะข้อความ hl7 เป็น Object สำหรับสร้าง Worklist
 function parsehl7ToWorklistItem(hl7Data) {
   // segment คั่นด้วย \r ตาม spec แต่บาง HIS ส่งมาเป็น \r\n จริง แยกให้ครอบคลุมทั้งสองแบบ
@@ -27,6 +33,13 @@ function parsehl7ToWorklistItem(hl7Data) {
     if (segment.startsWith('ORC')) orc = segment.split('|');
     if (segment.startsWith('OBR')) obr = segment.split('|');
   });
+
+  // MSH.9 Message Type/Trigger Event: ตาม spec รับเฉพาะ ORM (HIS สั่ง X-ray ใหม่/ยกเลิก) มาสร้าง worklist
+  // ADT/ORU เป็น flow อื่น (สร้าง/แก้ผู้ป่วย, รายงานผล) ไม่เกี่ยวกับการสร้าง worklist ปล่อยให้ข้ามไปแทนที่จะแกะ PID/OBR ผิดๆ
+  const messageType = (msh[8] || '').toUpperCase();
+  if (messageType && !messageType.startsWith('ORM')) {
+    throw new Error(`ข้ามข้อความ hl7 ชนิด "${messageType}" (รองรับเฉพาะ ORM สำหรับสร้าง worklist)`);
+  }
 
   // ORC.1 Order Control: NW = order ใหม่, CA = ขอยกเลิก order
   const orderControl = (orc[1] || 'NW').toUpperCase();
@@ -86,6 +99,18 @@ function parsehl7ToWorklistItem(hl7Data) {
   };
 }
 
+// สร้างข้อความ HL7 ยืนยันสถานะกลับไปที่ HIS (ORC.1=SC, ORC.5="CM" ตาม spec ข้อ 4)
+// ใช้ตอน MPPS แจ้งว่าฉายรังสีเสร็จแล้ว (COMPLETED) เพื่อเขียนลงตาราง xray_result
+function buildStatusChangedMessage(xn, options = {}) {
+  const { sendingApp = 'XRAY-WORKLIST', sendingFacility = '', receivingApp = 'HIS', receivingFacility = '' } = options;
+  const ts = formatHl7DateTime(new Date());
+  const controlId = ts + Math.floor(Math.random() * 1000); // ต้อง unique ต่อข้อความตาม spec MSH.9 แต่ไม่ต้องเรียงลำดับ
+  const msh = `MSH|^~\\&|${sendingApp}|${sendingFacility}|${receivingApp}|${receivingFacility}|${ts}||ORM^O01|${controlId}|P|2.3`;
+  const orc = `ORC|SC|${xn}|${xn}||CM||||${ts}`;
+  return `${msh}\r${orc}`;
+}
+
 module.exports = {
   parsehl7ToWorklistItem,
+  buildStatusChangedMessage,
 };

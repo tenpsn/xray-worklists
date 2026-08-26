@@ -54,6 +54,12 @@ function handleMppsStatusChange(accessionNumber, status) {
   if (status === 'COMPLETED' || status === 'DISCONTINUED') {
     dicomService.markLocallyConfirmed(accessionNumber);
     console.log(`[MPPS] ---> ลบไฟล์ worklist ของ XN: ${accessionNumber} เนื่องจากสถานะเป็น "${status}"`);
+
+    // HL7 mode: ยืนยันว่าฉายรังสีเสร็จแล้วกลับเข้าตาราง xray_result ตาม spec (ORC.1=SC)
+    if (status === 'COMPLETED' && currentSettings.his.hisSystem === 'hl7' && accessionNumber) {
+      const hl7Text = hl7Service.buildStatusChangedMessage(accessionNumber);
+      insertXrayResult(accessionNumber, 'ORM^O01', hl7Text);
+    }
   }
 }
 
@@ -313,6 +319,7 @@ function mapHl7RowsToRecords(rows, encoding) {
       if (row.xray_request_xn) item.xn = row.xray_request_xn;
       item.confirm = 'N';
       item.confirm_read_film = 'N';
+      item.xrayRequestId = row.xray_request_id; // เก็บไว้ไปยืนยัน xray_request_receive='Y' หลัง process เสร็จ
       records.push(item);
     } catch (err) {
       console.error(`[HL7] ---> แปลงข้อมูล xray_request id ${row.xray_request_id} ไม่สำเร็จ:`, err.message);
@@ -321,10 +328,50 @@ function mapHl7RowsToRecords(rows, encoding) {
   return records;
 }
 
+// dbType (mysql/mssql/postgres) เลือกฟังก์ชันวันเวลา "ตอนนี้" ที่ถูกต้องของแต่ละฐานข้อมูล
+function nowSqlExpr(dbType) {
+  if (dbType === 'mysql') return 'NOW()';
+  if (dbType === 'mssql') return 'GETDATE()';
+  return 'CURRENT_TIMESTAMP';
+}
+
+// ยืนยันกลับตาราง xray_request ว่า PACS อ่านและประมวลผล order นี้แล้ว ตาม spec (1.1 X-Ray Request)
+async function markXrayRequestReceived(id) {
+  if (!id) return;
+  try {
+    await db.query(
+      `UPDATE xray_request SET xray_request_receive = 'Y', xray_request_receive_datetime = ${nowSqlExpr(currentSettings.his.dbType)} WHERE xray_request_id = $1`,
+      [id]
+    );
+  } catch (err) {
+    console.error(`[HL7] ---> ยืนยัน xray_request_id ${id} เป็น received ไม่สำเร็จ:`, err.message);
+  }
+}
+
+// เขียนกลับตาราง xray_result ตาม spec (1.2 X-Ray Result) ให้ HIS มาอ่านสถานะ/ผลจาก PACS
+async function insertXrayResult(xn, msgType, hl7Text) {
+  try {
+    await db.query(
+      `INSERT INTO xray_result (xray_result_xn, xray_result_msg_type, xray_result_data, xray_result_datetime, xray_result_receive) VALUES ($1, $2, $3, ${nowSqlExpr(currentSettings.his.dbType)}, 'N')`,
+      [xn, msgType, hl7Text]
+    );
+  } catch (err) {
+    console.error(`[HL7] ---> เขียนผลยืนยันสถานะ XN ${xn} เข้า xray_result ไม่สำเร็จ:`, err.message);
+  }
+}
+
 // ทั้ง HOSxP และ SoftCon มีตาราง lookup แยกประเภทรายการอยู่แล้วในฐานข้อมูลเอง ไม่ต้องให้ผู้ใช้มาจับคู่เอง
+// hl7 ไม่ได้อยู่ใน spec HL7 มาตรฐาน (สเปกไม่มีตาราง group ให้) แต่ Gateway บางยี่ห้อ (เช่น BMS PACs Gateway) แถม table เดียวกับ HOSxP มาให้ด้วย
 const MODALITY_GROUP_CATALOG_QUERY = {
   hosxp: 'SELECT xray_items_group AS id, name FROM xray_items_group ORDER BY xray_items_group',
   softcon: 'SELECT RadItemCategoryKey AS id, Name AS name FROM RadItemCategory ORDER BY RadItemCategoryKey',
+  hl7: 'SELECT xray_items_group AS id, name FROM xray_items_group ORDER BY xray_items_group',
+};
+
+// HL7 message มีแค่ xray_items_code (OBR-4.1) ไม่มี group ติดมาด้วยเหมือน query ของ HOSxP/SoftCon โดยตรง
+// ต้อง join code -> group เองก่อน ผ่านตาราง xray_items ของ Gateway (มี column xray_items_group อยู่แล้ว)
+const ITEM_GROUP_BY_CODE_QUERY = {
+  hl7: 'SELECT xray_items_code AS code, xray_items_group AS group_id FROM xray_items',
 };
 
 const MODALITY_NAME_MATCH = {
@@ -352,11 +399,22 @@ function resolveModalityForGroup(hisSystem, groupId, groupName) {
   return guessModalityFromName(groupName);
 }
 
-// HL7 ไม่มีตาราง lookup เลยปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
+// ไม่มีตาราง group ให้เลย (Gateway ยี่ห้อนี้ไม่มี table แบบ HOSxP/SoftCon) ปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
 async function applyModalityMapping(records) {
   const hisSystem = currentSettings.his.hisSystem;
   const catalogQuery = MODALITY_GROUP_CATALOG_QUERY[hisSystem];
   if (!catalogQuery) return records;
+
+  // HL7: ต้อง join xray_items_code -> xray_items_group เองก่อน (query ของ HOSxP/SoftCon คืน group มาให้พร้อมอยู่แล้ว ไม่ต้องทำขั้นนี้)
+  const itemGroupQuery = ITEM_GROUP_BY_CODE_QUERY[hisSystem];
+  if (itemGroupQuery) {
+    const itemGroupResult = await db.query(itemGroupQuery);
+    const groupByCode = {};
+    itemGroupResult.rows.forEach((r) => { groupByCode[String(r.code)] = r.group_id; });
+    records.forEach((record) => {
+      record.xray_items_group = groupByCode[String(record.xray_items_code)];
+    });
+  }
 
   const catalogResult = await db.query(catalogQuery);
   const nameById = {};
@@ -740,6 +798,11 @@ async function processWorklistFiles(records, displayLang) {
           } else if (record.confirm_read_film === 'N') {
             // ยังไม่ยืนยันอ่านฟิล์ม (และไม่ได้จบงานในเครื่องนี้) ให้สร้างไฟล์ worklist
             await dicomService.generateWorklistFile(record);
+          }
+
+          // HL7 mode: ยืนยันกลับ DB ว่า order นี้ประมวลผลแล้ว (ไม่ว่าจะสร้าง/ลบ/ยกเลิกไฟล์ worklist) ตาม spec
+          if (record.xrayRequestId) {
+            await markXrayRequestReceived(record.xrayRequestId);
           }
         } catch (err) {
           console.error(`[DICOM Error] ---> ผิดพลาดในการสร้างไฟล์ XN: ${record.xn}`, err);
