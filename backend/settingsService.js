@@ -24,6 +24,9 @@ const DEFAULT_SETTINGS = {
     aet: process.env.MWL_AET || 'ORTHANC',
     port: process.env.MWL_PORT || '4242',
     mppsPort: process.env.MPPS_PORT || '7001', // พอร์ตแยกสำหรับรับ MPPS (N-CREATE/N-SET) จากเครื่อง Modality
+    // charset ที่ประกาศ/เข้ารหัสในไฟล์ .wl: 'UTF8' = ISO_IR 192 (ค่าเริ่มต้น), 'TIS620' = ISO_IR 166
+    // เครื่อง Modality บางรุ่นไม่รองรับ UTF-8 เต็มรูปแบบ ทำให้ตัวอักษรไทยในชื่อแพทย์/รายการตรวจเพี้ยน ต้องเปลี่ยนมาใช้ TIS620 แทน
+    dicomCharset: process.env.MWL_DICOM_CHARSET === 'TIS620' ? 'TIS620' : 'UTF8',
     // true (ค่าเริ่มต้น) = DicomAlwaysAllowFind/FindWorklist เปิดหมด ไม่ต้องลงทะเบียนเครื่อง Modality ก็ query ได้
     // false = ปิดหมด ต้องลงทะเบียนเครื่อง Modality ทีละแถวใน modalities ด้านล่างเท่านั้นถึงจะ query ได้
     modalityAlwaysAllow: true,

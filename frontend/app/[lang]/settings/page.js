@@ -20,6 +20,7 @@ const DEFAULT_FORM = {
     aet: '', // AET ของ Worklist Server เช่น Orthanc
     port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
     mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
+    dicomCharset: 'UTF8', // 'UTF8' (ISO_IR 192) | 'TIS620' (ISO_IR 166) — เครื่อง Modality บางรุ่นไม่รองรับ UTF-8
     modalityAlwaysAllow: true, // true = allow ทุกเครื่อง query worklist ได้ (ค่าเริ่มต้น), false = ต้องลงทะเบียนเครื่องใน modalities เท่านั้น
     modalities: [], // [{ aet, ip, port }] ใช้ตอน modalityAlwaysAllow เป็น false เท่านั้น เพิ่มได้หลายแถว
     modalityGroupOverride: {}, // { [hisSystem]: { [groupId]: modality } } แก้ทับค่าเดา built-in ของแต่ละ group
@@ -447,6 +448,18 @@ export default function SettingsPage() {
               onChange={(e) => updateMwl('mppsPort', e.target.value)}
             />
           </label>
+
+          <label>
+            {dict.dicomCharsetLabel}
+            <select
+              value={form.mwl.dicomCharset || 'UTF8'}
+              onChange={(e) => updateMwl('dicomCharset', e.target.value)}
+            >
+              <option value="UTF8">{dict.dicomCharsetUtf8Option}</option>
+              <option value="TIS620">{dict.dicomCharsetTis620Option}</option>
+            </select>
+          </label>
+          <p className="field-note" style={{ gridColumn: '1 / -1' }}>{dict.dicomCharsetNote}</p>
 
           {/*
             ซ่อนตัวเลือก Allow any / Whitelist ไว้ก่อน ใช้ "Allow any X-ray machine" ไปก่อน

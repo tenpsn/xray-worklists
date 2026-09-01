@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const iconv = require('iconv-lite');
 const romanizeModule = require('@dehoist/romanize-thai');
 const romanize = typeof romanizeModule === 'function' ? romanizeModule : romanizeModule.default;
 const { loadSettings } = require('./settingsService');
@@ -208,6 +209,7 @@ function computeItemHash(item) {
     xray_items_code: item.xray_items_code,
     lang: item.lang === 'en' ? 'en' : 'th',
     stationAet: loadSettings().mwl.aet || 'ORTHANC',
+    dicomCharset: loadSettings().mwl.dicomCharset || 'UTF8',
   };
   return crypto.createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
 }
@@ -358,10 +360,16 @@ async function generateWorklistFile(item) {
       const sex = item.sex === '1' ? 'M' : item.sex === '2' ? 'F' : 'O';
       const stationAet = loadSettings().mwl.aet || 'ORTHANC';
 
+      // เครื่อง Modality บางรุ่นไม่รองรับ UTF-8 (ISO_IR 192) เต็มรูปแบบ ทำให้ตัวอักษรไทยเพี้ยน
+      // ตั้งจากหน้าเว็บให้เปลี่ยนไปเข้ารหัส/ประกาศเป็น TIS620 (ISO_IR 166) แทนได้
+      const dicomCharset = loadSettings().mwl.dicomCharset === 'TIS620' ? 'TIS620' : 'UTF8';
+      const specificCharacterSet = dicomCharset === 'TIS620' ? 'ISO_IR 166' : 'ISO_IR 192';
+
       // ตัวอย่างข้อมูล รูปแบบไฟล์ .dump
       const dumpContent = `
-(0008,0005) CS [ISO_IR 192] # Specific Character Set (บอกว่าเป็น UTF-8)
+(0008,0005) CS [${specificCharacterSet}] # Specific Character Set
 (0008,0050) SH [${accessionNumber}] # Accession Number
+(0008,0090) PN [${doctorName}] # Referring Physician's Name
 (0010,0010) PN [${patientName}] # Patient Name
 (0010,0020) LO [${patientId}] # Patient ID
 (0010,0030) DA [${dob}] # Patient Birth Date
@@ -375,7 +383,6 @@ async function generateWorklistFile(item) {
     (0040,0002) DA [${studyDate}] # Scheduled Procedure Step Start Date
     (0040,0003) TM [${studyTime}] # Scheduled Procedure Step Start Time
     (0008,0060) CS [${item.Modality || 'CR'}] # Modality
-    (0040,0006) PN [${doctorName}] # Scheduled Performing Physician's Name
     (0008,1030) LO [${item.xraylist || ''}]
     (0040,0007) LO [${item.xraylist || ''}]
     (0040,0008) SQ
