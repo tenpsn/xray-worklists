@@ -579,6 +579,7 @@ export default function SettingsPage() {
                   <option value="CT">CT</option>
                   <option value="MR">MR</option>
                   <option value="MG">MG</option>
+                  <option value="IO">IO</option>
                   <option value="ECG">ECG</option>
                 </select>
               </div>
