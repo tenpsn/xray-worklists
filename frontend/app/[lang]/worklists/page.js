@@ -51,6 +51,16 @@ export default function Page() {
   // ดังนั้นถ้าค้นหาใหม่ค่า confirm_read_film ที่ได้จาก HIS จะยังเป็น N เหมือนเดิม แต่ไฟล์ .wl จะไม่ถูกสร้างซ้ำแล้วเพราะ backend จำไว้)
   const [filmConfirmedXNs, setFilmConfirmedXNs] = useState(new Set());
   const [confirmingXn, setConfirmingXn] = useState(null);
+  const [showNamePrefix, setShowNamePrefix] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/settings`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success) setShowNamePrefix(json.settings.mwl.showNamePrefix !== false);
+      })
+      .catch(() => {});
+  }, []);
 
   async function confirmReadFilm(xn) {
     setConfirmingXn(xn);
@@ -286,7 +296,7 @@ export default function Page() {
               <th>XN</th>
               <th>HN</th>
               <th>CID</th>
-              <th>{dict.table.prefix}</th>
+              {showNamePrefix && <th>{dict.table.prefix}</th>}
               <th>{dict.table.firstName}</th>
               <th>{dict.table.lastName}</th>
               <th>{dict.table.birthday}</th>
@@ -312,7 +322,7 @@ export default function Page() {
                 <td>{row.xn ?? ''}</td>
                 <td>{row.hn ?? ''}</td>
                 <td>{row.cid ?? ''}</td>
-                <td>{formatPrefixField(row.pname)}</td>
+                {showNamePrefix && <td>{formatPrefixField(row.pname)}</td>}
                 <td>{formatNameField(row.fname, lang)}</td>
                 <td>{formatNameField(row.lname, lang)}</td>
                 <td>{row.birthday ?? ''}</td>

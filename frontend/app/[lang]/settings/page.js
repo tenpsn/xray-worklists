@@ -21,6 +21,7 @@ const DEFAULT_FORM = {
     port: '', // พอร์ตสำหรับรับ C-FIND จากเครื่อง Modality
     mppsPort: '7001', // พอร์ตแยกสำหรับรับ MPPS N-CREATE/N-SET จากเครื่อง Modality
     dicomCharset: 'UTF8', // 'UTF8' (ISO_IR 192) | 'TIS620' (ISO_IR 166) — เครื่อง Modality บางรุ่นไม่รองรับ UTF-8
+    showNamePrefix: true, // true = แสดงคอลัมน์คำนำหน้าชื่อในตาราง worklist, false = ซ่อน
     modalityAlwaysAllow: true, // true = allow ทุกเครื่อง query worklist ได้ (ค่าเริ่มต้น), false = ต้องลงทะเบียนเครื่องใน modalities เท่านั้น
     modalities: [], // [{ aet, ip, port }] ใช้ตอน modalityAlwaysAllow เป็น false เท่านั้น เพิ่มได้หลายแถว
     modalityGroupOverride: {}, // { [hisSystem]: { [groupId]: modality } } แก้ทับค่าเดา built-in ของแต่ละ group
@@ -460,6 +461,17 @@ export default function SettingsPage() {
             </select>
           </label>
           <p className="field-note" style={{ gridColumn: '1 / -1' }}>{dict.dicomCharsetNote}</p>
+
+          <label>
+            {dict.showNamePrefixLabel}
+            <select
+              value={form.mwl.showNamePrefix !== false ? 'show' : 'hide'}
+              onChange={(e) => updateMwl('showNamePrefix', e.target.value === 'show')}
+            >
+              <option value="show">{dict.showNamePrefixShowOption}</option>
+              <option value="hide">{dict.showNamePrefixHideOption}</option>
+            </select>
+          </label>
 
           {/*
             ซ่อนตัวเลือก Allow any / Whitelist ไว้ก่อน ใช้ "Allow any X-ray machine" ไปก่อน

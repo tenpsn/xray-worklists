@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
     // charset ที่ประกาศ/เข้ารหัสในไฟล์ .wl: 'UTF8' = ISO_IR 192 (ค่าเริ่มต้น), 'TIS620' = ISO_IR 166
     // เครื่อง Modality บางรุ่นไม่รองรับ UTF-8 เต็มรูปแบบ ทำให้ตัวอักษรไทยในชื่อแพทย์/รายการตรวจเพี้ยน ต้องเปลี่ยนมาใช้ TIS620 แทน
     dicomCharset: process.env.MWL_DICOM_CHARSET === 'TIS620' ? 'TIS620' : 'UTF8',
+    // true (ค่าเริ่มต้น) = แสดงคอลัมน์ "คำนำหน้า" (นาย/นาง/พญ. ฯลฯ) ในตาราง worklist, false = ซ่อน
+    showNamePrefix: true,
     // true (ค่าเริ่มต้น) = DicomAlwaysAllowFind/FindWorklist เปิดหมด ไม่ต้องลงทะเบียนเครื่อง Modality ก็ query ได้
     // false = ปิดหมด ต้องลงทะเบียนเครื่อง Modality ทีละแถวใน modalities ด้านล่างเท่านั้นถึงจะ query ได้
     modalityAlwaysAllow: true,

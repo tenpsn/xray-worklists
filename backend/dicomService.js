@@ -207,9 +207,11 @@ function computeItemHash(item) {
     Doctor: item.Doctor,
     xraylist: item.xraylist,
     xray_items_code: item.xray_items_code,
+    pname: item.pname,
     lang: item.lang === 'en' ? 'en' : 'th',
     stationAet: loadSettings().mwl.aet || 'ORTHANC',
     dicomCharset: loadSettings().mwl.dicomCharset || 'UTF8',
+    showNamePrefix: loadSettings().mwl.showNamePrefix !== false,
   };
   return crypto.createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
 }
@@ -328,8 +330,12 @@ async function generateWorklistFile(item) {
       const lastName = useEnglish ? safeRomanize(item.lname) : (item.lname || '');
       const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
 
+      // ถ้าตั้งค่าให้แสดงคำนำหน้าชื่อไว้ ต่อคำนำหน้า (item.pname เช่น นาย/นาง/นางสาว) ไว้หน้าชื่อจริงเสมอเป็นภาษาไทย ไม่แปลงตามภาษา
+      const showNamePrefix = loadSettings().mwl.showNamePrefix !== false;
+      const namePrefix = showNamePrefix ? (item.pname || '') : '';
+
       // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
-      const patientName = `${firstName}^${lastName}`;
+      const patientName = `${namePrefix}${firstName}^${lastName}`;
 
       // รหัสรายการ (xray_items_code) ใช้ทั้งใน RequestedProcedureID และ ScheduledProtocolCodeSequence>CodeValue
       const procedureCode = item.xray_items_code || '';
@@ -402,7 +408,12 @@ async function generateWorklistFile(item) {
       const wlFilePath = path.join(WORKLIST_DIR, wlFileName);
 
       // 1. เขียนไฟล์ .dump
-      fs.writeFileSync(dumpFilePath, dumpContent, 'utf8');
+      // TIS620 ต้อง encode เป็น single-byte เอง เพราะ dump2dcm ไม่แปลง encoding ให้ ใช้ byte ตรงจากไฟล์
+      if (dicomCharset === 'TIS620') {
+        fs.writeFileSync(dumpFilePath, iconv.encode(dumpContent, 'tis620'));
+      } else {
+        fs.writeFileSync(dumpFilePath, dumpContent, 'utf8');
+      }
 
       // 2. ใช้คำสั่ง dump2dcm เพื่อแปลง .dump เป็น .wl
       // Windows: ใช้ dump2dcm.exe ที่แถมมากับโปรเจกต์ / Linux (Docker): ใช้ dcmtk ที่ลงผ่าน apt แทน
