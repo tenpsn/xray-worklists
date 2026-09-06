@@ -1,29 +1,10 @@
-function buildAuthHeader(username, password) {
-  if (!username && !password) return null;
-  const token = Buffer.from(`${username || ''}:${password || ''}`).toString('base64');
-  return `Basic ${token}`;
-}
-
-function normalizeOrthancUrl(url) {
-  return String(url || '').trim().replace(/\/+$/, '');
-}
-
-// แปลง YYYY-MM-DD (จาก <input type=date>) เป็น YYYYMMDD ตามฟอร์แมตของ DICOM
-function toDicomDate(isoDate) {
-  return String(isoDate || '').replace(/-/g, '');
-}
-
-async function orthancFetch(orthancUrl, authHeader, pathname, options = {}) {
-  const res = await fetch(`${orthancUrl}${pathname}`, {
-    ...options,
-    headers: {
-      ...(authHeader ? { Authorization: authHeader } : {}),
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  return res;
-}
+const {
+  buildAuthHeader,
+  normalizeOrthancUrl,
+  toDicomDate,
+  orthancFetch,
+  deleteStudyById,
+} = require('../orthanc-shared/orthancClient');
 
 async function findStudies(orthancUrl, username, password, fromDate, toDate) {
   const normalizedUrl = normalizeOrthancUrl(orthancUrl);
@@ -59,16 +40,6 @@ async function findStudies(orthancUrl, username, password, fromDate, toDate) {
       studyDescription: tags.StudyDescription || '',
     };
   });
-}
-
-async function deleteStudyById(orthancUrl, authHeader, id) {
-  const res = await orthancFetch(orthancUrl, authHeader, `/studies/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`ลบไม่สำเร็จ (${res.status}): ${text || res.statusText}`);
-  }
 }
 
 const DELETE_MAX_ATTEMPTS = 3;

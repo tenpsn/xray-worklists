@@ -23,6 +23,11 @@ export default function HomePage() {
           <h2>{dict.cleanerCardTitle}</h2>
           <p>{dict.cleanerCardDesc}</p>
         </Link>
+        <Link className="menu-card" href={`/${lang}/orthanc-mover`}>
+          <div className="menu-icon">📤</div>
+          <h2>{dict.moverCardTitle}</h2>
+          <p>{dict.moverCardDesc}</p>
+        </Link>
       </div>
     </div>
   );

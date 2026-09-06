@@ -5,4 +5,5 @@ worklists
 .env
 settings.json
 mpps-state.json
+orthanc-mover/mover-state.json
 *.log

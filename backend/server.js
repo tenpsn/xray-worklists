@@ -12,6 +12,8 @@ const db = require('./db');
 const Mppsservice = require('./Mppsservice');
 const hl7Service = require('./hl7Service');
 const orthancCleanerRoutes = require('./orthanc-cleaner/routes');
+const orthancMoverRoutes = require('./orthanc-mover/routes');
+const orthancMoverService = require('./orthanc-mover/orthancMoverService');
 const iconv = require('iconv-lite');
 
 const app = express();
@@ -614,6 +616,7 @@ app.get('/health', async (req, res) => {
 });
 
 app.use('/api/orthanc', orthancCleanerRoutes);
+app.use('/api/orthanc-mover', orthancMoverRoutes);
 
 app.get('/api/settings', (req, res) => {
   res.json({
@@ -1112,4 +1115,5 @@ dbReadyPromise.finally(() => {
   });
 
   startAutoWorklistLoop();
+  orthancMoverService.resumeIfNeeded();
 });
