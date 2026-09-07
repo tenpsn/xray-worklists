@@ -279,14 +279,16 @@ function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs =
     return buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType);
   }
   if (hisSystem === 'hl7') {
-    return buildHl7Query(dateback, dbType);
+    return buildHl7Query(dateback, dbType, confirm);
   }
   return buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbType, xns_NN, xns_YN, xns_NY);
 }
 
 // HL7 - อ่านคิว order จากตาราง xray_request ที่ระบบ Gateway ฝั่ง HIS เขียนไว้
 // จำกัดช่วงวันตาม dateback เหมือน hosxp/softcon กันดึง backlog สะสมทั้งหมดย้อนหลังไม่จำกัด
-function buildHl7Query(dateback, dbType) {
+// confirm=true (ค่า default ของ checkbox "Unconfirmed only") จะซ่อนรายการที่ xray_request_receive='Y' ไปแล้ว
+// เหมือน HOSxP/SoftCon - ติ๊กออกเพื่อดูรายการที่ประมวลผลไปแล้วด้วย
+function buildHl7Query(dateback, dbType, confirm) {
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 1;
 
   let dateFilter;
@@ -298,8 +300,14 @@ function buildHl7Query(dateback, dbType) {
     dateFilter = `xray_request_datetime >= current_date - $1::integer`;
   }
 
+  let sql = `SELECT xray_request_id, xray_request_xn, xray_request_data, xray_request_receive FROM xray_request WHERE ${dateFilter}`;
+  if (confirm) {
+    sql += ` AND xray_request_receive = 'N'`;
+  }
+  sql += ` ORDER BY xray_request_id ASC`;
+
   return {
-    sql: `SELECT xray_request_id, xray_request_xn, xray_request_data FROM xray_request WHERE xray_request_receive = 'N' AND ${dateFilter} ORDER BY xray_request_id ASC`,
+    sql,
     params: [safeDateback],
   };
 }
@@ -319,8 +327,11 @@ function mapHl7RowsToRecords(rows, encoding) {
     try {
       const item = hl7Service.parsehl7ToWorklistItem(decodeHl7Blob(row.xray_request_data, encoding));
       if (row.xray_request_xn) item.xn = row.xray_request_xn;
-      item.confirm = 'N';
+      // confirm สะท้อน xray_request_receive (Gateway ประมวลผล order นี้แล้วหรือยัง) ไม่ใช่สถานะอ่านฟิล์ม
+      // ห้าม map ใส่ confirm_read_film เด็ดขาด เพราะ field นั้นควบคุมการลบไฟล์ .wl (จบงาน) - ผูกผิดจะลบไฟล์ order ที่เพิ่งสร้างทันที
+      item.confirm = row.xray_request_receive === 'Y' ? 'Y' : 'N';
       item.confirm_read_film = 'N';
+      item.hl7Received = row.xray_request_receive === 'Y'; // ใช้ guard ไม่ให้ processWorklistFiles ประมวลผลซ้ำ
       item.xrayRequestId = row.xray_request_id; // เก็บไว้ไปยืนยัน xray_request_receive='Y' หลัง process เสร็จ
       records.push(item);
     } catch (err) {
@@ -757,6 +768,19 @@ let isGeneratingWorklists = false;
 // จำนวนไฟล์สร้างพร้อมกัน ปรับเพิ่มได้ถ้าเครื่องแรงพอ
 const WORKLIST_CONCURRENCY = 5;
 
+// เงื่อนไข สร้างไฟล์ .wl
+// HL7 บังคับดู confirm_read_film เสมอ
+// HOSxP/SoftCon เลือกได้ผ่าน comfirmLogic (confirm/confirm_read_film/both) ที่หน้า settings
+function shouldGenerateWorklist(record, hisSystem, confirmLogic) {
+  if (hisSystem === 'hl7') {
+    return record.confirm_read_film === 'N';
+  }
+  if (confirmLogic === 'confirm') return record.confirm === 'N';
+  if (confirmLogic === 'confirm_read_film') return record.confirm_read_film === 'N';
+  // 'both' (ค่าเริ่มต้น): สร้างไฟล์ก็ต่อเมื่อทั้งยืนยันผลตรวจและยืนยันอ่านฟิล์มยังเป็น N อยู่
+  return record.confirm === 'N' && record.confirm_read_film === 'N';
+}
+
 async function processWorklistFiles(records, displayLang) {
   if (isGeneratingWorklists) {
     console.warn('[Worklist] ---> รอบก่อนหน้ายังสร้างไฟล์ไม่เสร็จ ข้ามรอบนี้ไปก่อน');
@@ -764,8 +788,11 @@ async function processWorklistFiles(records, displayLang) {
   }
   isGeneratingWorklists = true;
 
+  const hisSystem = currentSettings.his.hisSystem;
+  const confirmLogic = currentSettings.mwl.autoGenerate.confirmLogic || 'both';
+
   try {
-    // 1. กรองเอาเฉพาะข้อมูลที่ไม่ซ้ำกัน ใช้ xn เป็นตัวตรวจสอบ 
+    // 1. กรองเอาเฉพาะข้อมูลที่ไม่ซ้ำกัน ใช้ xn เป็นตัวตรวจสอบ
     const uniqueRecords = [];
     const seenXn = new Set();
     
@@ -781,6 +808,7 @@ async function processWorklistFiles(records, displayLang) {
       const batch = uniqueRecords.slice(i, i + WORKLIST_CONCURRENCY);
       await Promise.all(batch.map(async (record) => {
         try {
+          if (record.hl7Received) return;
           record.lang = displayLang;
 
           // ใช้ sanitizer เดียวกับที่ dicomService สร้างชื่อไฟล์จริง ให้ตรงกับ MPPS ที่ตอบกลับมา
@@ -799,8 +827,7 @@ async function processWorklistFiles(records, displayLang) {
             // (กดยืนยันอ่านฟิล์มจากหน้าเว็บ หรือเครื่อง X-ray ส่ง MPPS แจ้ง COMPLETED/DISCONTINUED มา) โดยไม่ต้องรอ HIS อัปเดต
             dicomService.deleteWorklistFile(record.xn);
 
-          } else if (record.confirm_read_film === 'N') {
-            // ยังไม่ยืนยันอ่านฟิล์ม (และไม่ได้จบงานในเครื่องนี้) ให้สร้างไฟล์ worklist
+          } else if (shouldGenerateWorklist(record, hisSystem, confirmLogic)) {
             await dicomService.generateWorklistFile(record);
           }
 
@@ -932,6 +959,48 @@ app.post('/api/xray-report/confirm-read-film', (req, res) => {
   }
   dicomService.markLocallyConfirmed(String(xn));
   res.json({ success: true });
+});
+
+// api สำหรับดึงข้อมูล 
+app.get('/api/worklist', async (req, res) => {
+  const hisConfig = currentSettings.his || {};
+  if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
+    return res.status(400).json({ success: false, errorCode: 'DB_NOT_CONFIGURED' });
+  }
+
+  try {
+    // ไม่ใส่ dateback หรือใส่มาเป็นค่าว่าง ให้ถือว่าเหมือนกัน คือใช้ default 1 วัน
+    const rawDateback = req.query.dateback;
+    const dateback = (rawDateback === undefined || rawDateback === '' || !Number.isFinite(Number(rawDateback)))
+      ? 1
+      : Number(rawDateback);
+    const { include, exclude } = req.query;
+    const confirmFlag = req.query.confirm === 'true' || req.query.confirm === '1';
+
+    const { sql, params } = buildXrayReportQuery(
+      dateback, include, exclude, confirmFlag,
+      [], [], [], [],
+      currentSettings.his.dbType,
+      currentSettings.his.hisSystem
+    );
+
+    const result = await db.query(sql, params);
+    const records = currentSettings.his.hisSystem === 'hl7'
+      ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
+      : result.rows;
+    await applyModalityMapping(records);
+
+    records.forEach((record) => {
+      if (record.confirm_read_film !== 'Y' && dicomService.isLocallyConfirmed(record.xn)) {
+        record.confirm_read_film = 'Y';
+      }
+    });
+
+    res.json({ success: true, count: records.length, data: records });
+  } catch (err) {
+    console.error('[Worklist API] ---> Query error:', err);
+    res.status(500).json({ success: false, ...db.friendlyErrorCode(err) });
+  }
 });
 
 // เช็คว่า path ที่ให้มาเป็นของไดรฟ์ Windows หรือไม่ เช่น "D:\" หรือ "D:"

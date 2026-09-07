@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
       include: process.env.AUTO_GENERATE_INCLUDE || '',
       exclude: process.env.AUTO_GENERATE_EXCLUDE || '',
       confirm: process.env.AUTO_GENERATE_CONFIRM === 'true' || false,
+      confirmLogic: process.env.AUTO_GENERATE_CONFIRM_LOGIC || 'both',
     },
   },
 };

@@ -28,6 +28,7 @@ const DEFAULT_FORM = {
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
+      confirmLogic: 'both', // 'confirm_read_film' | 'confirm' | 'both' สร้างไฟล์ ใช้เฉพาะ HOSxP/SoftCon
     },
   },
 };
@@ -302,6 +303,15 @@ export default function SettingsPage() {
     }
   }
 
+  const confirmLogicValue = form.mwl.autoGenerate.confirmLogic || 'both';
+  const useConfirmField = confirmLogicValue === 'confirm' || confirmLogicValue === 'both';
+  const useReadFilmField = confirmLogicValue === 'confirm_read_film' || confirmLogicValue === 'both';
+  function setConfirmLogicFields(nextConfirm, nextReadFilm) {
+    if (!nextConfirm && !nextReadFilm) return; // ต้องเลือกอย่างน้อย 1 field เสมอ
+    const next = nextConfirm && nextReadFilm ? 'both' : nextConfirm ? 'confirm' : 'confirm_read_film';
+    updateAutoGenerate('confirmLogic', next);
+  }
+
   return (
     <>
       <h1>{dict.title}</h1>
@@ -561,6 +571,32 @@ export default function SettingsPage() {
               onChange={(e) => updateAutoGenerate('intervalSec', Number(e.target.value) || 1)}
             />
           </label>
+
+          {(form.his.hisSystem === 'hosxp' || form.his.hisSystem === 'softcon') && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: '13px', color: '#444', marginBottom: '6px' }}>{dict.confirmLogicLabel}</div>
+              <div style={{ display: 'flex', gap: '20px' }}>
+                <label style={{ flexDirection: 'row', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#444' }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: '18px', height: '18px' }}
+                    checked={useConfirmField}
+                    onChange={(e) => setConfirmLogicFields(e.target.checked, useReadFilmField)}
+                  />
+                  {dict.confirmLogicConfirmOption}
+                </label>
+                <label style={{ flexDirection: 'row', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#444' }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: '18px', height: '18px' }}
+                    checked={useReadFilmField}
+                    onChange={(e) => setConfirmLogicFields(useConfirmField, e.target.checked)}
+                  />
+                  {dict.confirmLogicReadFilmOption}
+                </label>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
