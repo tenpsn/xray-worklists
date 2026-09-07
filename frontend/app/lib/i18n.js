@@ -137,6 +137,16 @@ const dictionaries = {
       createFolderFailedError: 'Failed to create folder',
       detectFailedPrefix: 'Check failed: ',
       savedButDbFailedPrefix: 'Settings saved, but database connection failed: ',
+      messages: {
+        savedNoDbTest: 'Settings saved. Database info incomplete, connection not tested',
+        savedAndConnected: 'Settings saved and database connected successfully',
+        saveFailed: 'Failed to save settings',
+        detectedSoftcon: 'Detected this database as SoftCon system',
+        detectedHosxp: 'Detected this database as HOSxP system',
+        detectedBoth: 'Found both HOSxP and SoftCon tables in the same database. Please select the system manually',
+        detectedNone: 'No HOSxP or SoftCon tables found in this database. Please check the database name/user permissions again',
+        warningPrefix: 'Warning: ',
+      },
       modal: {
         title: 'Choose Worklist folder',
         selectDriveLabel: 'Select drive',
@@ -377,6 +387,16 @@ const dictionaries = {
       createFolderFailedError: 'สร้างโฟลเดอร์ไม่สำเร็จ',
       detectFailedPrefix: 'ตรวจสอบไม่สำเร็จ: ',
       savedButDbFailedPrefix: 'บันทึกการตั้งค่าแล้ว แต่เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ',
+      messages: {
+        savedNoDbTest: 'บันทึกการตั้งค่าเรียบร้อย กรอกข้อมูลฐานข้อมูลไม่ครบ ไม่ได้ทดสอบเชื่อมต่อ',
+        savedAndConnected: 'บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ',
+        saveFailed: 'บันทึกการตั้งค่าไม่สำเร็จ',
+        detectedSoftcon: 'ตรวจพบว่าฐานข้อมูลนี้เป็นระบบ SoftCon',
+        detectedHosxp: 'ตรวจพบว่าฐานข้อมูลนี้เป็นระบบ HOSxP',
+        detectedBoth: 'พบตารางของทั้ง HOSxP และ SoftCon ในฐานข้อมูลเดียวกัน กรุณาเลือกระบบด้วยตนเอง',
+        detectedNone: 'ไม่พบตารางของ HOSxP หรือ SoftCon ในฐานข้อมูลนี้ กรุณาตรวจสอบชื่อฐานข้อมูล/สิทธิ์ผู้ใช้งานอีกครั้ง',
+        warningPrefix: 'คำเตือน: ',
+      },
       modal: {
         title: 'เลือกโฟลเดอร์เก็บไฟล์ Worklist',
         selectDriveLabel: 'เลือกไดรฟ์',
@@ -490,4 +510,12 @@ export function getDictionary(lang) {
 export function formatDbError(fullDict, errorCode, params) {
   const entry = fullDict.dbErrors[errorCode] || fullDict.dbErrors.UNKNOWN;
   return typeof entry === 'function' ? entry(params || {}) : entry;
+}
+
+export function formatSettingsMessage(fullDict, messageKey, warningText) {
+  const messages = fullDict.settings.messages;
+  const entry = messages[messageKey];
+  const base = typeof entry === 'function' ? entry() : (entry || '');
+  if (!warningText) return base;
+  return `${base} (${messages.warningPrefix}${warningText})`;
 }

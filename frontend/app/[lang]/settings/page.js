@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { getDictionary, formatDbError } from '../../lib/i18n';
+import { getDictionary, formatDbError, formatSettingsMessage } from '../../lib/i18n';
 
 const DEFAULT_FORM = {
   his: {
@@ -248,7 +248,7 @@ export default function SettingsPage() {
       if (json.success && json.detected) {
         updateHisSystem(json.detected);
       }
-      setStatus(json.errorCode ? dict.detectFailedPrefix + formatDbError(fullDict, json.errorCode, json.errorParams) : json.message);
+      setStatus(json.errorCode ? dict.detectFailedPrefix + formatDbError(fullDict, json.errorCode, json.errorParams) : formatSettingsMessage(fullDict, json.messageKey));
       setStatusType(json.success && json.detected ? 'success' : 'error');
     } catch (err) {
       setStatus(dict.connectErrorPrefix + err.message);
@@ -280,9 +280,11 @@ export default function SettingsPage() {
       const json = await res.json();
       setWorklistDirActive(json.worklistDirActive || '');
       if (json.savedButDbFailed) {
-        setStatus(dict.savedButDbFailedPrefix + formatDbError(fullDict, json.errorCode, json.errorParams) + (json.warningText || ''));
+        const dbErrorText = formatDbError(fullDict, json.errorCode, json.errorParams);
+        const warningSuffix = json.warningText ? ` (${dict.messages.warningPrefix}${json.warningText})` : '';
+        setStatus(dict.savedButDbFailedPrefix + dbErrorText + warningSuffix);
       } else {
-        setStatus(json.message);
+        setStatus(formatSettingsMessage(fullDict, json.messageKey, json.warningText));
       }
       setStatusType(json.success ? 'success' : 'error');
 

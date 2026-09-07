@@ -9,9 +9,32 @@ export function truncateName(text) {
   return str.length > MAX_LEN ? str.slice(0, MAX_LEN) + '...' : str;
 }
 
-// คำนำหน้า (นาย/นาง/นพ/พญ ฯลฯ) ไม่ต้องแปลงเป็นภาษาอังกฤษ ให้แสดงเป็นภาษาไทยเสมอ
-export function formatPrefixField(thaiText) {
-  return truncateName(thaiText);
+// คำนำหน้าที่มีคำแปลอังกฤษ
+const ENGLISH_PREFIX_MAP = {
+  'พญ': 'Dr.',
+  'นพ': 'Dr.',
+  'ทพ': 'Dr.',
+  'ทพญ': 'Dr.',
+  'ดร': 'Dr.',
+  'ผศ': 'Asst. Prof.',
+  'รศ': 'Assoc. Prof.',
+  'ศ': 'Prof.',
+  'พว': 'RN',
+  'นาย': 'Mr.',
+  'นาง': 'Mrs.',
+  'นางสาว': 'Ms.',
+  'นส': 'Ms.',
+};
+
+// คำนำหน้าอื่นที่ไม่มี ไม่ต้องใส่คำนำหน้า
+function toEnglishPrefix(rawPrefix) {
+  const normalized = String(rawPrefix || '').replace(/ว่าที่/g, '').replace(/[.\s]/g, '');
+  return ENGLISH_PREFIX_MAP[normalized] || '';
+}
+
+export function formatPrefixField(thaiText, lang) {
+  if (lang !== 'en') return truncateName(thaiText);
+  return truncateName(toEnglishPrefix(thaiText));
 }
 
 // ชื่อ / นามสกุล
@@ -44,7 +67,7 @@ function splitDoctorPrefix(text) {
 
 // ชื่อแพทย์
 // lang === 'th' -> โชว์ภาษาไทย
-// lang === 'en' -> คำนำหน้ายังเป็นภาษาไทย ส่วนชื่อ-นามสกุลแปลงเป็นภาษาอังกฤษ
+// lang === 'en' -> คำนำหน้าแปลเป็นอังกฤษถ้ามี mapping ส่วนชื่อ-นามสกุลแปลงเป็นภาษาอังกฤษ
 export function formatDoctorField(thaiText, lang) {
   if (lang !== 'en') return truncateName(thaiText);
 
@@ -57,6 +80,7 @@ export function formatDoctorField(thaiText, lang) {
     englishRaw = '';
   }
 
-  const combined = prefix ? `${prefix} ${englishRaw}`.trim() : englishRaw;
+  const englishPrefix = prefix ? toEnglishPrefix(prefix) : '';
+  const combined = [englishPrefix, englishRaw].filter(Boolean).join(' ').trim();
   return truncateName(combined);
 }

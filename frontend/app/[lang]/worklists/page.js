@@ -322,7 +322,7 @@ export default function Page() {
                 <td>{row.xn ?? ''}</td>
                 <td>{row.hn ?? ''}</td>
                 <td>{row.cid ?? ''}</td>
-                {showNamePrefix && <td>{formatPrefixField(row.pname)}</td>}
+                {showNamePrefix && <td>{formatPrefixField(row.pname, lang)}</td>}
                 <td>{formatNameField(row.fname, lang)}</td>
                 <td>{formatNameField(row.lname, lang)}</td>
                 <td>{row.birthday ?? ''}</td>

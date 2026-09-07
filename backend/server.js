@@ -689,20 +689,20 @@ app.post('/api/settings/detect-his-system', async (req, res) => {
     const { existsHosxp, existsSoftcon } = await db.detectHisSystem(hisInput);
 
     let detected = null;
-    let message;
+    let messageKey;
     if (existsSoftcon && !existsHosxp) {
       detected = 'softcon';
-      message = 'ตรวจพบว่าฐานข้อมูลนี้เป็นระบบ SoftCon';
+      messageKey = 'detectedSoftcon';
     } else if (existsHosxp && !existsSoftcon) {
       detected = 'hosxp';
-      message = 'ตรวจพบว่าฐานข้อมูลนี้เป็นระบบ HOSxP';
+      messageKey = 'detectedHosxp';
     } else if (existsHosxp && existsSoftcon) {
-      message = 'พบตารางของทั้ง HOSxP และ SoftCon ในฐานข้อมูลเดียวกัน กรุณาเลือกระบบด้วยตนเอง';
+      messageKey = 'detectedBoth';
     } else {
-      message = 'ไม่พบตารางของ HOSxP หรือ SoftCon ในฐานข้อมูลนี้ กรุณาตรวจสอบชื่อฐานข้อมูล/สิทธิ์ผู้ใช้งานอีกครั้ง';
+      messageKey = 'detectedNone';
     }
 
-    res.json({ success: true, detected, existsHosxp, existsSoftcon, message });
+    res.json({ success: true, detected, existsHosxp, existsSoftcon, messageKey });
   } catch (err) {
     console.error('[Settings] ---> ตรวจสอบระบบ HIS ไม่สำเร็จ:', err.message);
     res.json({
@@ -726,14 +726,15 @@ app.post('/api/settings', async (req, res) => {
       restartAutoGenLoop: true,
     });
 
-    const warningText = warnings.length > 0 ? ` (คำเตือน: ${warnings.join(' | ')})` : '';
+    const warningText = warnings.length > 0 ? warnings.join(' | ') : '';
 
     if (dbSkipped) {
       return res.json({
         success: true,
         settings: maskSecrets(currentSettings),
         worklistDirActive: toDisplayPath(dicomService.getWorklistDir()),
-        message: `บันทึกการตั้งค่าเรียบร้อย กรอกข้อมูลฐานข้อมูลไม่ครบ ไม่ได้ทดสอบเชื่อมต่อ${warningText}`,
+        messageKey: 'savedNoDbTest',
+        warningText,
       });
     }
 
@@ -742,7 +743,8 @@ app.post('/api/settings', async (req, res) => {
         success: true,
         settings: maskSecrets(currentSettings),
         worklistDirActive: toDisplayPath(dicomService.getWorklistDir()),
-        message: `บันทึกการตั้งค่าเรียบร้อย และเชื่อมต่อฐานข้อมูลสำเร็จ${warningText}`,
+        messageKey: 'savedAndConnected',
+        warningText,
       });
     }
 
@@ -757,7 +759,7 @@ app.post('/api/settings', async (req, res) => {
     });
   } catch (err) {
     console.error('[Settings] ---> บันทึกไม่สำเร็จ:', err);
-    res.status(500).json({ success: false, message: 'บันทึกการตั้งค่าไม่สำเร็จ', error: err.message });
+    res.status(500).json({ success: false, messageKey: 'saveFailed', error: err.message });
   }
 });
 

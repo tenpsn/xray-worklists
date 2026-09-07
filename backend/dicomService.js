@@ -10,6 +10,29 @@ const { loadSettings } = require('./settingsService');
 // คำนำหน้าของแพทย์/ผู้ป่วยที่ไม่ต้องแปลงเป็นอังกฤษ
 const PREFIX_PATTERN = /^(ว่าที่\s*)?(พญ|นพ|ทพ|ทพญ|นางสาว|นาง|นาย|ดร|ผศ|รศ|ศ|น\.ส|(?:[ก-ฮ]+\.\s*)+(?:หญิง)?)\.?\s*/;
 
+// คำนำหน้าที่มีคำแปลอังกฤษ
+const ENGLISH_PREFIX_MAP = {
+  'พญ': 'Dr.',
+  'นพ': 'Dr.',
+  'ทพ': 'Dr.',
+  'ทพญ': 'Dr.',
+  'ดร': 'Dr.',
+  'ผศ': 'Asst. Prof.',
+  'รศ': 'Assoc. Prof.',
+  'ศ': 'Prof.',
+  'พว': 'RN',
+  'นาย': 'Mr.',
+  'นาง': 'Mrs.',
+  'นางสาว': 'Ms.',
+  'นส': 'Ms.',
+};
+
+// คำนำหน้าอื่นที่ไม่มี ไม่ต้องใส่คำนำหน้า
+function toEnglishPrefix(rawPrefix) {
+  const normalized = String(rawPrefix || '').replace(/ว่าที่/g, '').replace(/[.\s]/g, '');
+  return ENGLISH_PREFIX_MAP[normalized] || '';
+}
+
 // แปลงข้อความไทยเป็นอังกฤษถ้าแปลงไม่ได้ให้คืนค่าเดิม
 function safeRomanize(text) {
   if (!text) return '';
@@ -26,16 +49,17 @@ function sanitizeFileName(accessionNumber) {
 }
 
 // สำหรับชื่อแพทย์ที่มีคำนำหน้าติดอยู่ในสตริงเดียวกัน เช่น พญ.พิมพ์ชนก
-// -> ตัดคำนำหน้าออกก่อน ไม่ให้ถูกแปลงเป็นอังกฤษไปด้วย แล้วต่อกลับด้วยภาษาไทยเหมือนเดิม
+// ตัดคำนำหน้าออกก่อน ไม่ให้ถูกแปลงเป็นอังกฤษไปด้วย แล้วแปลคำนำหน้าเป็นอังกฤษถ้ามี mapping
 function romanizeDoctorName(text) {
   const str = String(text || '');
   const match = str.match(PREFIX_PATTERN);
   if (!match) return safeRomanize(str);
 
-  const prefix = match[0].trim();
+  const rawPrefix = match[0].trim();
   const rest = str.slice(match[0].length);
   const romanizedRest = safeRomanize(rest);
-  return romanizedRest ? `${prefix} ${romanizedRest}`.trim() : prefix;
+  const englishPrefix = toEnglishPrefix(rawPrefix);
+  return [englishPrefix, romanizedRest].filter(Boolean).join(' ').trim();
 }
 
 // สร้าง StudyInstanceUID ที่ปลอดภัยและถูกต้องตามมาตรฐาน DICOM
@@ -325,17 +349,20 @@ async function generateWorklistFile(item) {
       const patientId = sanitizeFileName(rawPatientId);
       const useEnglish = item.lang === 'en';
 
-      // ถ้าเลือกภาษาอังกฤษ ให้แปลงชื่อ-นามสกุลผู้ป่วยเป็นอังกฤษ / ชื่อแพทย์ คงคำนำหน้าไทยไว้
       const firstName = useEnglish ? safeRomanize(item.fname) : (item.fname || '');
       const lastName = useEnglish ? safeRomanize(item.lname) : (item.lname || '');
       const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
 
-      // ถ้าตั้งค่าให้แสดงคำนำหน้าชื่อไว้ ต่อคำนำหน้า (item.pname เช่น นาย/นาง/นางสาว) ไว้หน้าชื่อจริงเสมอเป็นภาษาไทย ไม่แปลงตามภาษา
       const showNamePrefix = loadSettings().mwl.showNamePrefix !== false;
-      const namePrefix = showNamePrefix ? (item.pname || '') : '';
+      const namePrefix = showNamePrefix
+        ? (useEnglish ? toEnglishPrefix(item.pname) : (item.pname || ''))
+        : '';
 
       // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
-      const patientName = `${namePrefix}${firstName}^${lastName}`;
+      // ภาษาอังกฤษเว้นวรรคคั่นคำนำหน้ากับชื่อ ส่วนภาษาไทยชนกัน
+      const patientName = namePrefix
+        ? `${namePrefix}${useEnglish ? ' ' : ''}${firstName}^${lastName}`
+        : `${firstName}^${lastName}`;
 
       // รหัสรายการ (xray_items_code) ใช้ทั้งใน RequestedProcedureID และ ScheduledProtocolCodeSequence>CodeValue
       const procedureCode = item.xray_items_code || '';
