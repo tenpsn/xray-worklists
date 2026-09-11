@@ -6,5 +6,6 @@ backend/worklists/
 backend/mpps-state.json
 backend/settings.json
 backend/orthanc-mover/mover-state.json
+backend/orthanc-mover/mover-plan/
 
 frontend/.next/
