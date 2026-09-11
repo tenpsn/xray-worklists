@@ -280,4 +280,12 @@ function resumeIfNeeded() {
   }
 }
 
-module.exports = { buildJob, runMoveJob, resumeIfNeeded, DEST_MODALITY_NAME };
+module.exports = {
+  buildJob,
+  runMoveJob,
+  resumeIfNeeded,
+  DEST_MODALITY_NAME,
+  enumerateDates,
+  STORE_MAX_ATTEMPTS,
+  STORE_RETRY_DELAY_MS,
+};
