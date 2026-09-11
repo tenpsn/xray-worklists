@@ -5,13 +5,23 @@ const moverState = require('./moverState');
 
 const router = express.Router();
 
-// ห้ามส่ง password ของ Orthanc ต้นทางกลับไปให้ frontend
+// ห้ามส่ง password ของ Orthanc ต้นทาง/ปลายทางกลับไปให้ frontend
 function sanitizeStateForClient(state) {
   if (!state) return state;
-  const { source, ...rest } = state;
+  const { source, destination, ...rest } = state;
   return {
     ...rest,
     source: source ? { orthancUrl: source.orthancUrl, username: source.username } : undefined,
+    destination: destination
+      ? {
+          name: destination.name,
+          aet: destination.aet,
+          host: destination.host,
+          port: destination.port,
+          restUrl: destination.restUrl,
+          restUsername: destination.restUsername,
+        }
+      : undefined,
   };
 }
 
@@ -40,7 +50,20 @@ router.post('/preview', async (req, res) => {
 });
 
 router.post('/start', async (req, res) => {
-  const { orthancUrl, username, password, from, to, destAet, destHost, destPort } = req.body;
+  const {
+    orthancUrl,
+    username,
+    password,
+    from,
+    to,
+    destAet,
+    destHost,
+    destPort,
+    destRestUrl,
+    destRestUsername,
+    destRestPassword,
+    concurrency,
+  } = req.body;
   if (!orthancUrl || !from || !to || !destAet || !destHost || !destPort) {
     return res.status(400).json({
       success: false,
@@ -54,7 +77,20 @@ router.post('/start', async (req, res) => {
   }
 
   try {
-    const job = await buildJob({ orthancUrl, username, password, from, to, destAet, destHost, destPort });
+    const job = await buildJob({
+      orthancUrl,
+      username,
+      password,
+      from,
+      to,
+      destAet,
+      destHost,
+      destPort,
+      destRestUrl,
+      destRestUsername,
+      destRestPassword,
+      concurrency,
+    });
     moverState.setState(job);
 
     runMoveJob().catch((err) => {
@@ -85,6 +121,26 @@ router.post('/stop', (req, res) => {
     return res.status(400).json({ success: false, message: 'ไม่มีงานที่กำลังทำงานอยู่' });
   }
   state.stopRequested = true;
+  moverState.saveState();
+  res.json({ success: true });
+});
+
+router.post('/pause', (req, res) => {
+  const state = moverState.getState();
+  if (!state || state.status !== 'running') {
+    return res.status(400).json({ success: false, message: 'ไม่มีงานที่กำลังทำงานอยู่' });
+  }
+  state.paused = true;
+  moverState.saveState();
+  res.json({ success: true });
+});
+
+router.post('/resume', (req, res) => {
+  const state = moverState.getState();
+  if (!state || state.status !== 'running') {
+    return res.status(400).json({ success: false, message: 'ไม่มีงานที่กำลังทำงานอยู่' });
+  }
+  state.paused = false;
   moverState.saveState();
   res.json({ success: true });
 });

@@ -19,6 +19,10 @@ export default function OrthancMoverPage() {
   const [destAet, setDestAet] = useState('');
   const [destHost, setDestHost] = useState('');
   const [destPort, setDestPort] = useState('');
+  const [destRestUrl, setDestRestUrl] = useState('');
+  const [destRestUsername, setDestRestUsername] = useState('');
+  const [destRestPassword, setDestRestPassword] = useState('');
+  const [concurrency, setConcurrency] = useState('');
 
   const [previewing, setPreviewing] = useState(false);
   const [previewStatus, setPreviewStatus] = useState({ text: '', type: 'info' });
@@ -26,6 +30,8 @@ export default function OrthancMoverPage() {
 
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [startStatus, setStartStatus] = useState({ text: '', type: 'info' });
   const [jobState, setJobState] = useState(null);
   const [expandedDate, setExpandedDate] = useState(null);
@@ -103,6 +109,10 @@ export default function OrthancMoverPage() {
           destAet,
           destHost,
           destPort,
+          destRestUrl,
+          destRestUsername,
+          destRestPassword,
+          concurrency,
         }),
       });
       const data = await res.json();
@@ -128,7 +138,28 @@ export default function OrthancMoverPage() {
     }
   }
 
+  async function handlePause() {
+    setPausing(true);
+    try {
+      await fetch('/api/orthanc-mover/pause', { method: 'POST' });
+      await fetchStatus();
+    } finally {
+      setPausing(false);
+    }
+  }
+
+  async function handleResume() {
+    setResuming(true);
+    try {
+      await fetch('/api/orthanc-mover/resume', { method: 'POST' });
+      await fetchStatus();
+    } finally {
+      setResuming(false);
+    }
+  }
+
   const isRunning = jobState && jobState.status === 'running';
+  const isPaused = isRunning && jobState.paused;
 
   function currentDateProgress() {
     if (!jobState || !jobState.currentDate || !Array.isArray(jobState.plan)) return null;
@@ -164,6 +195,7 @@ export default function OrthancMoverPage() {
     if (jobState.status === 'running') {
       return (
         <p className="status-info">
+          {jobState.paused ? `${dict.statusPausedPrefix} ` : ''}
           {dateProgress
             ? dict.statusRunningText(dateProgress.date, dateProgress.done, dateProgress.total)
             : dict.statusRunningText('-', 0, 0)}
@@ -245,6 +277,27 @@ export default function OrthancMoverPage() {
             {dict.destPortLabel}
             <input type="number" value={destPort} onChange={(e) => setDestPort(e.target.value)} />
           </label>
+          <label>
+            {dict.destRestUrlLabel}
+            <input
+              type="text"
+              placeholder={`http://${destHost || 'host'}:8042`}
+              value={destRestUrl}
+              onChange={(e) => setDestRestUrl(e.target.value)}
+            />
+          </label>
+          <label>
+            {dict.destRestUsernameLabel}
+            <input type="text" autoComplete="off" value={destRestUsername} onChange={(e) => setDestRestUsername(e.target.value)} />
+          </label>
+          <label>
+            {dict.destRestPasswordLabel}
+            <input type="password" autoComplete="off" value={destRestPassword} onChange={(e) => setDestRestPassword(e.target.value)} />
+          </label>
+          <label>
+            {dict.concurrencyLabel}
+            <input type="number" min="1" placeholder="6" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} />
+          </label>
         </div>
 
         <div className="settings-actions">
@@ -254,6 +307,16 @@ export default function OrthancMoverPage() {
           <button onClick={handleStart} disabled={starting || isRunning}>
             {starting ? dict.startingButton : dict.startButton}
           </button>
+          {isRunning && !isPaused && (
+            <button onClick={handlePause} disabled={pausing}>
+              {pausing ? dict.pausingButton : dict.pauseButton}
+            </button>
+          )}
+          {isPaused && (
+            <button onClick={handleResume} disabled={resuming}>
+              {resuming ? dict.resumingButton : dict.resumeButton}
+            </button>
+          )}
           {isRunning && (
             <button className="btn-danger" onClick={handleStop} disabled={stopping}>
               {stopping ? dict.stoppingButton : dict.stopButton}
@@ -300,6 +363,12 @@ export default function OrthancMoverPage() {
               )}
             </p>
           )}
+          {Array.isArray(jobState.searchFailures) && jobState.searchFailures.length > 0 && (
+            <p className="status-error">
+              {dict.searchFailuresText(jobState.searchFailures.length)}{' '}
+              {jobState.searchFailures.map((f) => f.date).join(', ')}
+            </p>
+          )}
 
           {dailyBreakdown().length > 0 && (
             <div className="table-wrap">
@@ -336,6 +405,7 @@ export default function OrthancMoverPage() {
                                     <th>{dict.expandTable.status}</th>
                                     <th>XN</th>
                                     <th>HN</th>
+                                    <th>{dict.expandTable.reason}</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -347,6 +417,7 @@ export default function OrthancMoverPage() {
                                       <td>{dict.statusLabels[s.status] || s.status}</td>
                                       <td>{s.accessionNumber || '-'}</td>
                                       <td>{s.patientId || '-'}</td>
+                                      <td>{s.message || '-'}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -360,6 +431,19 @@ export default function OrthancMoverPage() {
                 </tbody>
               </table>
             </div>
+          )}
+
+          {Array.isArray(jobState.errors) && jobState.errors.length > 0 && (
+            <>
+              <h3>{dict.failedCasesTitle}</h3>
+              <ul className="failed-cases-list">
+                {jobState.errors.map((e, idx) => (
+                  <li key={`${e.studyId}-${idx}`} className="status-error">
+                    {dict.failedCasesLine(e.date, e.patientId || '-', e.accessionNumber || '-', e.message)}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       )}
