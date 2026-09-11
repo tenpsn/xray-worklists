@@ -48,7 +48,7 @@ router.post('/start', async (req, res) => {
 
   const current = moverState.getState();
   if (current && current.status === 'running') {
-    return res.status(409).json({ success: false, message: 'มีงานย้ายข้อมูลกำลังทำงานอยู่ กรุณารอให้เสร็จหรือกดหยุดก่อน' });
+    return res.status(409).json({ success: false, message: 'มีงานย้ายข้อมูลกำลังทำงานอยู่ กรุณารอให้เสร็จก่อน' });
   }
 
   try {
@@ -74,7 +74,7 @@ router.post('/start', async (req, res) => {
       state.status = 'error';
       state.error = err.message;
       state.finishedAt = Date.now();
-      moverState.saveState();
+      moverState.saveSummary();
     });
 
     res.json({ success: true, state: sanitizeStateForClient(job) });
@@ -88,36 +88,6 @@ router.post('/start', async (req, res) => {
 
 router.get('/status', (req, res) => {
   res.json({ success: true, state: sanitizeStateForClient(moverState.getState()) });
-});
-
-router.post('/stop', (req, res) => {
-  const state = moverState.getState();
-  if (!state || state.status !== 'running') {
-    return res.status(400).json({ success: false, message: 'ไม่มีงานที่กำลังทำงานอยู่' });
-  }
-  state.stopRequested = true;
-  moverState.saveState();
-  res.json({ success: true });
-});
-
-router.post('/pause', (req, res) => {
-  const state = moverState.getState();
-  if (!state || state.status !== 'running') {
-    return res.status(400).json({ success: false, message: 'ไม่มีงานที่กำลังทำงานอยู่' });
-  }
-  state.paused = true;
-  moverState.saveState();
-  res.json({ success: true });
-});
-
-router.post('/resume', (req, res) => {
-  const state = moverState.getState();
-  if (!state || state.status !== 'running') {
-    return res.status(400).json({ success: false, message: 'ไม่มีงานที่กำลังทำงานอยู่' });
-  }
-  state.paused = false;
-  moverState.saveState();
-  res.json({ success: true });
 });
 
 module.exports = router;

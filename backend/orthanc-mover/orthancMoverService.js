@@ -86,8 +86,6 @@ async function buildJob({
     },
     errors: [],
     searchFailures: [],
-    stopRequested: false,
-    paused: false,
     error: null,
     startedAt: Date.now(),
     updatedAt: Date.now(),
@@ -118,7 +116,7 @@ async function runMoveJob() {
       state.status = 'error';
       state.error = err.message;
       state.finishedAt = Date.now();
-      moverState.saveState();
+      moverState.saveSummary();
       return;
     }
 
@@ -183,17 +181,16 @@ async function runMoveJob() {
 
       state.totals.doneStudies += 1;
       state.updatedAt = Date.now();
-      moverState.saveState();
+      moverState.appendStudyUpdate(dateEntry.date, study);
+      moverState.saveSummary();
     }
 
     const dates = enumerateDates(state.from, state.to);
 
     for (const day of dates) {
-      if (state.stopRequested) break;
-
       const dicomDay = toDicomDate(day);
       state.currentDate = dicomDay;
-      moverState.saveState();
+      moverState.saveSummary();
 
       // ค้นหาทีละวันแทนช่วงเดียวทั้งหมด - เจอวันไหนส่งวันนั้นก่อน ค่อยไปค้นหาวันถัดไป (เหมือน
       // movestudy.js) กันช่วงกว้างๆ ค้นหาทีเดียวช้าเกินไป. ถ้าวันนี้เคยค้นหาไปแล้ว (resume หลัง
@@ -217,7 +214,7 @@ async function runMoveJob() {
         if (lastErr) {
           state.searchFailures.push({ date: dicomDay, message: lastErr.message });
           state.updatedAt = Date.now();
-          moverState.saveState();
+          moverState.saveSummary();
           continue;
         }
 
@@ -228,7 +225,8 @@ async function runMoveJob() {
         state.plan.push(dateEntry);
         state.totals.totalStudies += dateEntry.studies.length;
         state.updatedAt = Date.now();
-        moverState.saveState();
+        moverState.recordDayDiscovered(dateEntry);
+        moverState.saveSummary();
       }
 
       // ข้ามวันที่ทำครบทุกรายการไปแล้ว (resume หลัง restart) หรือวันที่ค้นหาแล้วไม่เจอเคส
@@ -239,11 +237,6 @@ async function runMoveJob() {
         let nextIndex = 0;
         async function worker() {
           while (nextIndex < pendingStudies.length) {
-            while (state.paused && !state.stopRequested) {
-              await sleep(200);
-            }
-            if (state.stopRequested) break;
-            if (nextIndex >= pendingStudies.length) break;
             const study = pendingStudies[nextIndex];
             nextIndex += 1;
             await processStudy(study, dateEntry);
@@ -256,13 +249,13 @@ async function runMoveJob() {
       // คำนวณใหม่จาก plan ทั้งหมดแทนการนับสะสม กัน resume หลัง restart นับซ้ำ
       state.totals.doneDates = state.plan.filter((d) => d.studies.every((s) => s.status !== 'pending')).length;
       state.updatedAt = Date.now();
-      moverState.saveState();
+      moverState.saveSummary();
     }
 
-    state.status = state.stopRequested ? 'stopped' : 'done';
+    state.status = 'done';
     state.currentDate = null;
     state.finishedAt = Date.now();
-    moverState.saveState();
+    moverState.saveSummary();
   } finally {
     running = false;
   }

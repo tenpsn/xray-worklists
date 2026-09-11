@@ -25,9 +25,6 @@ export default function OrthancMoverPage() {
   const [concurrency, setConcurrency] = useState('');
 
   const [starting, setStarting] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const [pausing, setPausing] = useState(false);
-  const [resuming, setResuming] = useState(false);
   const [startStatus, setStartStatus] = useState({ text: '', type: 'info' });
   const [jobState, setJobState] = useState(null);
   const [expandedDate, setExpandedDate] = useState(null);
@@ -96,38 +93,7 @@ export default function OrthancMoverPage() {
     }
   }
 
-  async function handleStop() {
-    setStopping(true);
-    try {
-      await fetch('/api/orthanc-mover/stop', { method: 'POST' });
-      await fetchStatus();
-    } finally {
-      setStopping(false);
-    }
-  }
-
-  async function handlePause() {
-    setPausing(true);
-    try {
-      await fetch('/api/orthanc-mover/pause', { method: 'POST' });
-      await fetchStatus();
-    } finally {
-      setPausing(false);
-    }
-  }
-
-  async function handleResume() {
-    setResuming(true);
-    try {
-      await fetch('/api/orthanc-mover/resume', { method: 'POST' });
-      await fetchStatus();
-    } finally {
-      setResuming(false);
-    }
-  }
-
   const isRunning = jobState && jobState.status === 'running';
-  const isPaused = isRunning && jobState.paused;
 
   function currentDateProgress() {
     if (!jobState || !jobState.currentDate || !Array.isArray(jobState.plan)) return null;
@@ -163,7 +129,6 @@ export default function OrthancMoverPage() {
     if (jobState.status === 'running') {
       return (
         <p className="status-info">
-          {jobState.paused ? `${dict.statusPausedPrefix} ` : ''}
           {dateProgress
             ? dict.statusRunningText(dateProgress.date, dateProgress.done, dateProgress.total)
             : dict.statusRunningText('-', 0, 0)}
@@ -175,14 +140,6 @@ export default function OrthancMoverPage() {
       return (
         <p className="status-success">
           {dict.statusDoneText(jobState.totals.doneStudies, jobState.totals.totalStudies, success, failed)}
-        </p>
-      );
-    }
-    if (jobState.status === 'stopped') {
-      const { success, failed } = overallCounts();
-      return (
-        <p className="status-error">
-          {dict.statusStoppedText(jobState.totals.doneStudies, jobState.totals.totalStudies, success, failed)}
         </p>
       );
     }
@@ -272,21 +229,6 @@ export default function OrthancMoverPage() {
           <button onClick={handleStart} disabled={starting || isRunning}>
             {starting ? dict.startingButton : dict.startButton}
           </button>
-          {isRunning && !isPaused && (
-            <button onClick={handlePause} disabled={pausing}>
-              {pausing ? dict.pausingButton : dict.pauseButton}
-            </button>
-          )}
-          {isPaused && (
-            <button onClick={handleResume} disabled={resuming}>
-              {resuming ? dict.resumingButton : dict.resumeButton}
-            </button>
-          )}
-          {isRunning && (
-            <button className="btn-danger" onClick={handleStop} disabled={stopping}>
-              {stopping ? dict.stoppingButton : dict.stopButton}
-            </button>
-          )}
         </div>
         {startStatus.text && <p className={`status-${startStatus.type}`}>{startStatus.text}</p>}
       </div>

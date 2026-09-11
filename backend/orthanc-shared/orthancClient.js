@@ -76,9 +76,12 @@ async function getInstanceCount(orthancUrl, authHeader, studyId) {
 
 // เช็คไม่ใช่แค่ว่ามี Study นี้อยู่ที่ปลายทางไหม แต่เช็คว่าจำนวน instance (รูป) เท่ากับต้นทาง
 // หรือเปล่า - เคสที่ส่งไปได้บางส่วน (ไม่ครบ) จะดูเหมือน "มีอยู่แล้ว" ถ้าเช็คแค่การมีอยู่เฉยๆ.
-// จับคู่ด้วย Accession Number เป็นหลัก แต่ถ้าเคสไหนไม่มี Accession Number เลย (เช็คด้วยวิธีนั้น
-// ไม่ได้แน่ๆ) จะ fallback ไปใช้ StudyInstanceUID แทน - DICOM ไม่มีวันเปลี่ยนค่านี้ระหว่างส่งอยู่แล้ว
-// จึงไม่มีทางซ้ำกับเคสอื่นเหมือน Accession Number ที่บางระบบซ้ำกันได้.
+// จับคู่ด้วย Accession Number เป็นหลัก แต่ fallback ไปใช้ StudyInstanceUID แทนใน 2 กรณี:
+//   1. เคสนี้ไม่มี Accession Number เลย (เช็คด้วยวิธีนั้นไม่ได้แน่ๆ)
+//   2. ค้นด้วย Accession Number แล้วเจอที่ปลายทาง "มากกว่า 1 เคส" (XN ซ้ำกัน - เดาไม่ได้ว่าอันไหน
+//      ถูก ถ้าเชื่อตัวแรกเฉยๆ อาจไปเทียบกับเคสอื่นที่ไม่ใช่ตัวที่เพิ่งส่งจริง)
+// StudyInstanceUID ไม่มีวันเปลี่ยนระหว่างส่งและไม่มีทางซ้ำกับเคสอื่นตามมาตรฐาน DICOM เลย จึงใช้
+// แทนได้แม่นยำกว่าเสมอเมื่อ Accession Number เชื่อไม่ได้.
 // คืนค่า null ถ้าเช็คเองไม่สำเร็จ (เช่น ต่อปลายทางไม่ติด) มิเช่นนั้นคืนหนึ่งใน:
 //   { complete: true }
 //   { complete: false, found: false }                             - ไม่เจอที่ปลายทางเลย
@@ -87,24 +90,43 @@ async function checkStudyCompleteOnDestination(sourceUrl, sourceAuthHeader, sour
   const expectedCount = await getInstanceCount(sourceUrl, sourceAuthHeader, sourceStudyId);
   if (expectedCount === null) return null;
 
-  try {
-    let query = accessionNumber ? { AccessionNumber: accessionNumber } : null;
-    if (!query) {
-      const sourceStudyRes = await orthancFetch(sourceUrl, sourceAuthHeader, `/studies/${encodeURIComponent(sourceStudyId)}`);
-      if (!sourceStudyRes.ok) return null;
-      const sourceStudy = await sourceStudyRes.json().catch(() => null);
-      const studyInstanceUid = sourceStudy && sourceStudy.MainDicomTags && sourceStudy.MainDicomTags.StudyInstanceUID;
-      if (!studyInstanceUid) return null;
-      query = { StudyInstanceUID: studyInstanceUid };
-    }
+  async function findByStudyInstanceUid() {
+    const sourceStudyRes = await orthancFetch(sourceUrl, sourceAuthHeader, `/studies/${encodeURIComponent(sourceStudyId)}`);
+    if (!sourceStudyRes.ok) return null;
+    const sourceStudy = await sourceStudyRes.json().catch(() => null);
+    const studyInstanceUid = sourceStudy && sourceStudy.MainDicomTags && sourceStudy.MainDicomTags.StudyInstanceUID;
+    if (!studyInstanceUid) return null;
 
     const res = await orthancFetch(destRestUrl, destAuthHeader, '/tools/find', {
       method: 'POST',
-      body: JSON.stringify({ Level: 'Study', Query: query }),
+      body: JSON.stringify({ Level: 'Study', Query: { StudyInstanceUID: studyInstanceUid } }),
     });
     if (!res.ok) return null;
     const matches = await res.json().catch(() => null);
-    if (!Array.isArray(matches)) return null;
+    return Array.isArray(matches) ? matches : null;
+  }
+
+  try {
+    let matches = null;
+
+    if (accessionNumber) {
+      const res = await orthancFetch(destRestUrl, destAuthHeader, '/tools/find', {
+        method: 'POST',
+        body: JSON.stringify({ Level: 'Study', Query: { AccessionNumber: accessionNumber } }),
+      });
+      if (!res.ok) return null;
+      matches = await res.json().catch(() => null);
+      if (!Array.isArray(matches)) return null;
+
+      if (matches.length > 1) {
+        matches = await findByStudyInstanceUid();
+        if (!Array.isArray(matches)) return null;
+      }
+    } else {
+      matches = await findByStudyInstanceUid();
+      if (!Array.isArray(matches)) return null;
+    }
+
     if (matches.length === 0) return { complete: false, found: false };
 
     const actualCount = await getInstanceCount(destRestUrl, destAuthHeader, matches[0]);

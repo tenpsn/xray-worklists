@@ -215,21 +215,12 @@ const dictionaries = {
       missingFieldsError: 'Please fill in Orthanc URL, date range, and destination AE Title/Host/Port',
       startButton: 'Start moving',
       startingButton: 'Starting...',
-      pauseButton: 'Pause',
-      pausingButton: 'Pausing...',
-      resumeButton: 'Resume',
-      resumingButton: 'Resuming...',
-      stopButton: 'Stop',
-      stoppingButton: 'Stopping...',
-      statusPausedPrefix: '[Paused]',
       startFailedError: 'Failed to start',
       alreadyRunningError: 'A move job is already running',
       statusIdleText: 'No move job has run yet',
       statusRunningText: (date, done, total) => `Moving ${date}: ${done}/${total} cases in this day`,
       statusDoneText: (done, total, success, failed) =>
         `Done — moved ${done}/${total} cases (${success} succeeded, ${failed} failed)`,
-      statusStoppedText: (done, total, success, failed) =>
-        `Stopped — moved ${done}/${total} cases (${success} succeeded, ${failed} failed)`,
       statusErrorText: (message) => `Error: ${message}`,
       overallProgressText: (doneDates, totalDates, doneStudies, totalStudies) =>
         `Days: ${doneDates}/${totalDates} — Cases: ${doneStudies}/${totalStudies}`,
@@ -470,21 +461,12 @@ const dictionaries = {
       missingFieldsError: 'กรุณากรอก Orthanc URL, ช่วงวันที่ และ AE Title/Host/Port ของปลายทางให้ครบ',
       startButton: 'เริ่มย้ายข้อมูล',
       startingButton: 'กำลังเริ่ม...',
-      pauseButton: 'หยุดชั่วคราว',
-      pausingButton: 'กำลังหยุดชั่วคราว...',
-      resumeButton: 'ทำต่อ',
-      resumingButton: 'กำลังทำต่อ...',
-      stopButton: 'หยุด',
-      stoppingButton: 'กำลังหยุด...',
-      statusPausedPrefix: '[พักไว้]',
       startFailedError: 'เริ่มงานไม่สำเร็จ',
       alreadyRunningError: 'มีงานย้ายข้อมูลกำลังทำงานอยู่แล้ว',
       statusIdleText: 'ยังไม่เคยมีการย้ายข้อมูล',
       statusRunningText: (date, done, total) => `กำลังย้ายวันที่ ${date}: ${done}/${total} เคสในวันนี้`,
       statusDoneText: (done, total, success, failed) =>
         `เสร็จสิ้น — ย้ายไปแล้ว ${done}/${total} เคส (สำเร็จ ${success} เคส, ไม่สำเร็จ ${failed} เคส)`,
-      statusStoppedText: (done, total, success, failed) =>
-        `หยุดแล้ว — ย้ายไปแล้ว ${done}/${total} เคส (สำเร็จ ${success} เคส, ไม่สำเร็จ ${failed} เคส)`,
       statusErrorText: (message) => `เกิดข้อผิดพลาด: ${message}`,
       overallProgressText: (doneDates, totalDates, doneStudies, totalStudies) =>
         `วัน: ${doneDates}/${totalDates} — เคส: ${doneStudies}/${totalStudies}`,

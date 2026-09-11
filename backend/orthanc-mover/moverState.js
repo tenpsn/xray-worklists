@@ -1,10 +1,10 @@
-// เก็บสถานะ job ย้าย Study ลง disk แบบ sync เพื่อให้ backend restart กลางงานแล้วทำต่อจากจุดเดิม
-// ได้ (ดู resumeIfNeeded ใน orthancMoverService.js) - แยกเป็น 2 ส่วน แทนที่จะรวมเป็นไฟล์เดียว:
+// เก็บสถานะ job ย้าย Study ลง disk เพื่อให้ backend restart กลางงานแล้วทำต่อจากจุดเดิมได้ (ดู
+// resumeIfNeeded ใน orthancMoverService.js) - แยกเป็น 2 ส่วน:
 //   1. ไฟล์สรุป (mover-state.json) - ทุกอย่างยกเว้นรายชื่อเคส เล็กและคงที่ เขียนทับได้ถี่ๆ สบายๆ
-//   2. ไฟล์รายวัน (mover-plan/{date}.json) - รายชื่อเคสของแต่ละวัน แยกไฟล์กันคนละวัน
-// เขียนทับแค่ไฟล์ของ "วันที่กำลังทำอยู่ตอนนี้" เท่านั้นทุกครั้งที่มีเคสเสร็จ วันที่ทำเสร็จไปแล้ว
-// จะไม่ถูกแตะอีกเลย - ขนาดที่ต้องเขียนทับต่อครั้งเลยคงที่ตามจำนวนเคสต่อวัน ไม่โตขึ้นเรื่อยๆ ตาม
-// ทั้งงาน (ปัญหาเดิมตอนเก็บทุกวันรวมเป็น JSON ก้อนเดียว ยิ่งงานยาวยิ่งเขียนช้าลงเรื่อยๆ)
+//   2. ไฟล์รายวันแบบ append-only (mover-plan/{date}.jsonl) - บรรทัดแรกคือรายชื่อเคสเริ่มต้น
+//      ทั้งหมดของวันนั้น (สถานะ pending) บรรทัดถัดๆ ไปคือ "เคสนี้ตอนนี้สถานะอะไร" ทีละบรรทัด
+//      ต่อท้ายไปเรื่อยๆ ไม่ใช่เขียนทับทั้งไฟล์เหมือนเดิม - เร็วเท่าไฟล์ log ของ movestudy.js (CLI)
+//      เพราะแค่ต่อท้าย ไม่ต้องอ่าน/เขียนเนื้อหาเดิมใหม่ทุกครั้งที่มี 1 เคสเสร็จ
 const fs = require('fs');
 const path = require('path');
 
@@ -25,7 +25,7 @@ function ensurePlanDir() {
 }
 
 function planFilePath(date) {
-  return path.join(PLAN_DIR, `${date}.json`);
+  return path.join(PLAN_DIR, `${date}.jsonl`);
 }
 
 // ลบไฟล์รายวันเก่าทั้งหมดทิ้ง - เรียกตอนเริ่มงานใหม่ (ล้างของงานก่อนหน้า) หรือตอน auto-clear
@@ -43,22 +43,50 @@ function clearPlanFiles() {
   }
 }
 
-// อ่านไฟล์สรุปกับไฟล์รายวันทุกไฟล์ที่มี แล้วประกอบกลับเป็น state เดียวเหมือนก่อนแยกไฟล์
+// อ่านไฟล์ .jsonl ของวันหนึ่ง (บรรทัดแรก = รายชื่อเคสเริ่มต้นทั้งหมด, บรรทัดถัดๆ ไป = อัปเดต
+// สถานะทีละเคสตามลำดับที่เกิดขึ้นจริง) แล้วเล่นซ้ำเอาค่าล่าสุดของแต่ละเคส ประกอบกลับเป็น
+// { date, studies } ก้อนเดียวเหมือนตอนยังเก็บเป็น JSON ไฟล์เดียว
+function loadDayFile(filePath, dateFromFileName) {
+  const text = fs.readFileSync(filePath, 'utf8');
+  const lines = text.split('\n').filter((l) => l.trim());
+  if (lines.length === 0) return null;
+
+  const first = JSON.parse(lines[0]);
+  const studies = first.studies;
+  const byId = new Map(studies.map((s) => [s.id, s]));
+
+  for (let i = 1; i < lines.length; i += 1) {
+    let evt;
+    try {
+      evt = JSON.parse(lines[i]);
+    } catch (err) {
+      continue; // บรรทัดนี้เขียนไม่สมบูรณ์ (เช่น backend ดับกลางคัน) - ข้ามไป ไม่ทำให้ทั้งไฟล์พัง
+    }
+    const s = byId.get(evt.id);
+    if (s) {
+      s.status = evt.status;
+      s.message = evt.message;
+    }
+  }
+
+  return { date: first.date || dateFromFileName, studies };
+}
+
 function loadStateFromDisk() {
   let summary;
   try {
-    const text = fs.readFileSync(STATE_FILE, 'utf8');
-    summary = JSON.parse(text);
+    summary = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   } catch (err) {
     return { status: 'idle' };
   }
 
   const plan = [];
   try {
-    const files = fs.readdirSync(PLAN_DIR).filter((f) => f.endsWith('.json')).sort();
+    const files = fs.readdirSync(PLAN_DIR).filter((f) => f.endsWith('.jsonl')).sort();
     for (const f of files) {
       try {
-        plan.push(JSON.parse(fs.readFileSync(path.join(PLAN_DIR, f), 'utf8')));
+        const entry = loadDayFile(path.join(PLAN_DIR, f), f.replace(/\.jsonl$/, ''));
+        if (entry) plan.push(entry);
       } catch (err) {
         // ไฟล์วันนั้นอ่านไม่ได้ - ข้ามไปดีกว่าทำให้ resume ทั้งงานพัง
       }
@@ -81,7 +109,7 @@ function getState() {
   ) {
     clearPlanFiles();
     state = { status: 'idle' };
-    saveState();
+    saveSummary();
   }
   return state;
 }
@@ -89,26 +117,43 @@ function getState() {
 function setState(newState) {
   clearPlanFiles();
   state = newState;
-  saveState();
+  saveSummary();
 }
 
-function saveState() {
+// บันทึกแค่ "สรุป" (ไม่มีรายชื่อเคส) - ไฟล์เล็กขนาดคงที่ เขียนทับได้บ่อยๆ สบายๆ ไม่แพงเหมือนเขียน
+// ทับรายชื่อเคสทั้งหมด
+function saveSummary() {
   try {
     ensurePlanDir();
     const { plan, ...summary } = state;
     fs.writeFileSync(STATE_FILE, JSON.stringify(summary), 'utf8');
-
-    // เขียนแค่ไฟล์ของวันที่กำลังทำอยู่ตอนนี้เท่านั้น - วันอื่นที่ทำไปแล้วก่อนหน้านี้ถูกบันทึกไว้
-    // ครบแล้วตั้งแต่ตอนที่มันยังเป็น currentDate อยู่ ไม่ต้องเขียนซ้ำอีก
-    if (state.currentDate && Array.isArray(plan)) {
-      const entry = plan.find((d) => d.date === state.currentDate);
-      if (entry) {
-        fs.writeFileSync(planFilePath(state.currentDate), JSON.stringify(entry), 'utf8');
-      }
-    }
   } catch (err) {
     console.error('[OrthancMover] ---> บันทึกสถานะ job ไม่สำเร็จ:', err.message);
   }
 }
 
-module.exports = { getState, setState, saveState };
+// เขียนบรรทัดแรกของไฟล์วันนั้น (รายชื่อเคสเริ่มต้นทั้งหมด สถานะ pending) - เรียกครั้งเดียวตอน
+// ค้นหาเจอวันนั้น ก่อนเริ่มส่งเคสไหนเลย
+function recordDayDiscovered(dateEntry) {
+  try {
+    ensurePlanDir();
+    const line = `${JSON.stringify({ date: dateEntry.date, studies: dateEntry.studies })}\n`;
+    fs.writeFileSync(planFilePath(dateEntry.date), line, 'utf8');
+  } catch (err) {
+    console.error('[OrthancMover] ---> บันทึกวันที่ใหม่ไม่สำเร็จ:', err.message);
+  }
+}
+
+// เขียนเพิ่ม 1 บรรทัดต่อท้ายไฟล์ของวันนั้น (สถานะล่าสุดของเคสเดียว) - ไม่ว่าไฟล์จะมีกี่บรรทัด
+// อยู่แล้วก็เร็วเท่าเดิม เพราะแค่ต่อท้าย ไม่ต้องอ่าน/เขียนเนื้อหาเดิมใหม่เลย
+function appendStudyUpdate(date, study) {
+  try {
+    ensurePlanDir();
+    const line = `${JSON.stringify({ id: study.id, status: study.status, message: study.message })}\n`;
+    fs.appendFileSync(planFilePath(date), line, 'utf8');
+  } catch (err) {
+    console.error('[OrthancMover] ---> บันทึกผลเคสไม่สำเร็จ:', err.message);
+  }
+}
+
+module.exports = { getState, setState, saveSummary, recordDayDiscovered, appendStudyUpdate };

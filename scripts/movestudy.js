@@ -310,24 +310,45 @@ async function checkStudyCompleteOnDestination(sourceUrl, sourceAuthHeader, sour
   const expectedCount = await getInstanceCount(sourceUrl, sourceAuthHeader, sourceStudyId);
   if (expectedCount === null) return null; // can't tell what "complete" even means here
 
-  try {
-    let query = accessionNumber ? { AccessionNumber: accessionNumber } : null;
-    if (!query) {
-      const sourceStudyRes = await orthancFetch(sourceUrl, sourceAuthHeader, `/studies/${encodeURIComponent(sourceStudyId)}`);
-      if (!sourceStudyRes.ok) return null;
-      const sourceStudy = await sourceStudyRes.json().catch(() => null);
-      const studyInstanceUid = sourceStudy && sourceStudy.MainDicomTags && sourceStudy.MainDicomTags.StudyInstanceUID;
-      if (!studyInstanceUid) return null;
-      query = { StudyInstanceUID: studyInstanceUid };
-    }
+  async function findByStudyInstanceUid() {
+    const sourceStudyRes = await orthancFetch(sourceUrl, sourceAuthHeader, `/studies/${encodeURIComponent(sourceStudyId)}`);
+    if (!sourceStudyRes.ok) return null;
+    const sourceStudy = await sourceStudyRes.json().catch(() => null);
+    const studyInstanceUid = sourceStudy && sourceStudy.MainDicomTags && sourceStudy.MainDicomTags.StudyInstanceUID;
+    if (!studyInstanceUid) return null;
 
     const res = await orthancFetch(destRestUrl, destAuthHeader, '/tools/find', {
       method: 'POST',
-      body: JSON.stringify({ Level: 'Study', Query: query }),
+      body: JSON.stringify({ Level: 'Study', Query: { StudyInstanceUID: studyInstanceUid } }),
     });
     if (!res.ok) return null;
     const matches = await res.json().catch(() => null);
-    if (!Array.isArray(matches)) return null;
+    return Array.isArray(matches) ? matches : null;
+  }
+
+  try {
+    let matches = null;
+
+    if (accessionNumber) {
+      const res = await orthancFetch(destRestUrl, destAuthHeader, '/tools/find', {
+        method: 'POST',
+        body: JSON.stringify({ Level: 'Study', Query: { AccessionNumber: accessionNumber } }),
+      });
+      if (!res.ok) return null;
+      matches = await res.json().catch(() => null);
+      if (!Array.isArray(matches)) return null;
+
+      // XN ซ้ำที่ปลายทาง (เจอมากกว่า 1 เคส) - เชื่อ matches[0] เดาไม่ได้ว่าอันไหนถูก
+      // fallback ไปเทียบด้วย StudyInstanceUID แทนเพื่อความแม่นยำ
+      if (matches.length > 1) {
+        matches = await findByStudyInstanceUid();
+        if (!Array.isArray(matches)) return null;
+      }
+    } else {
+      matches = await findByStudyInstanceUid();
+      if (!Array.isArray(matches)) return null;
+    }
+
     if (matches.length === 0) return { complete: false, found: false };
 
     const actualCount = await getInstanceCount(destRestUrl, destAuthHeader, matches[0]);
