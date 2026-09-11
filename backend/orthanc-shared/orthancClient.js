@@ -74,22 +74,33 @@ async function getInstanceCount(orthancUrl, authHeader, studyId) {
   }
 }
 
-// เช็คไม่ใช่แค่ว่ามี Study ที่ Accession Number นี้อยู่ที่ปลายทางไหม แต่เช็คว่าจำนวน instance
-// (รูป) เท่ากับต้นทางหรือเปล่า - เคสที่ส่งไปได้บางส่วน (ไม่ครบ) จะดูเหมือน "มีอยู่แล้ว" ถ้าเช็คแค่
-// การมีอยู่เฉยๆ. คืนค่า null ถ้าเช็คเองไม่สำเร็จ (เช่น ต่อปลายทางไม่ติด) มิเช่นนั้นคืนหนึ่งใน:
+// เช็คไม่ใช่แค่ว่ามี Study นี้อยู่ที่ปลายทางไหม แต่เช็คว่าจำนวน instance (รูป) เท่ากับต้นทาง
+// หรือเปล่า - เคสที่ส่งไปได้บางส่วน (ไม่ครบ) จะดูเหมือน "มีอยู่แล้ว" ถ้าเช็คแค่การมีอยู่เฉยๆ.
+// จับคู่ด้วย Accession Number เป็นหลัก แต่ถ้าเคสไหนไม่มี Accession Number เลย (เช็คด้วยวิธีนั้น
+// ไม่ได้แน่ๆ) จะ fallback ไปใช้ StudyInstanceUID แทน - DICOM ไม่มีวันเปลี่ยนค่านี้ระหว่างส่งอยู่แล้ว
+// จึงไม่มีทางซ้ำกับเคสอื่นเหมือน Accession Number ที่บางระบบซ้ำกันได้.
+// คืนค่า null ถ้าเช็คเองไม่สำเร็จ (เช่น ต่อปลายทางไม่ติด) มิเช่นนั้นคืนหนึ่งใน:
 //   { complete: true }
 //   { complete: false, found: false }                             - ไม่เจอที่ปลายทางเลย
 //   { complete: false, found: true, actualCount, expectedCount }   - เจอแต่ไม่ครบ
 async function checkStudyCompleteOnDestination(sourceUrl, sourceAuthHeader, sourceStudyId, destRestUrl, destAuthHeader, accessionNumber) {
-  if (!accessionNumber) return null;
-
   const expectedCount = await getInstanceCount(sourceUrl, sourceAuthHeader, sourceStudyId);
   if (expectedCount === null) return null;
 
   try {
+    let query = accessionNumber ? { AccessionNumber: accessionNumber } : null;
+    if (!query) {
+      const sourceStudyRes = await orthancFetch(sourceUrl, sourceAuthHeader, `/studies/${encodeURIComponent(sourceStudyId)}`);
+      if (!sourceStudyRes.ok) return null;
+      const sourceStudy = await sourceStudyRes.json().catch(() => null);
+      const studyInstanceUid = sourceStudy && sourceStudy.MainDicomTags && sourceStudy.MainDicomTags.StudyInstanceUID;
+      if (!studyInstanceUid) return null;
+      query = { StudyInstanceUID: studyInstanceUid };
+    }
+
     const res = await orthancFetch(destRestUrl, destAuthHeader, '/tools/find', {
       method: 'POST',
-      body: JSON.stringify({ Level: 'Study', Query: { AccessionNumber: accessionNumber } }),
+      body: JSON.stringify({ Level: 'Study', Query: query }),
     });
     if (!res.ok) return null;
     const matches = await res.json().catch(() => null);
