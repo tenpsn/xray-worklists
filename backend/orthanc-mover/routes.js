@@ -1,17 +1,6 @@
 const express = require('express');
-const { findStudies } = require('../orthanc-cleaner/orthancService');
-const {
-  buildJob,
-  runMoveJob,
-  enumerateDates,
-  STORE_MAX_ATTEMPTS,
-  STORE_RETRY_DELAY_MS,
-} = require('./orthancMoverService');
+const { buildJob, runMoveJob } = require('./orthancMoverService');
 const moverState = require('./moverState');
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 const router = express.Router();
 
@@ -34,61 +23,6 @@ function sanitizeStateForClient(state) {
       : undefined,
   };
 }
-
-router.post('/preview', async (req, res) => {
-  const { orthancUrl, username, password, from, to } = req.body;
-  if (!orthancUrl || !from || !to) {
-    return res.status(400).json({ success: false, message: 'กรุณากรอก Orthanc URL, วันที่เริ่ม และวันที่สิ้นสุดให้ครบ' });
-  }
-
-  // ค้นหาทีละวันแทนช่วงเดียวทั้งหมด (พร้อม retry ต่อวัน) เหมือนตอน "Start moving" จริง - ช่วง
-  // กว้างๆ ค้นหาทีเดียวเสี่ยง proxy timeout ระหว่างทางไป Orthanc ต้นทาง (เช่น nginx หน้า Orthanc
-  // จริง) ถ้าบางวันค้นหาไม่สำเร็จแม้ retry แล้ว ข้ามวันนั้นไปแทนที่จะทำให้ preview ทั้งหมดพัง
-  const dates = enumerateDates(from, to);
-  const countByDate = {};
-  const searchFailures = [];
-  let total = 0;
-
-  for (const day of dates) {
-    let dayStudies = null;
-    let lastErr = null;
-    for (let attempt = 1; attempt <= STORE_MAX_ATTEMPTS; attempt += 1) {
-      try {
-        dayStudies = await findStudies(orthancUrl, username, password, day, day);
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        await sleep(STORE_RETRY_DELAY_MS);
-      }
-    }
-
-    if (lastErr) {
-      const message = lastErr.message === 'fetch failed' ? 'เชื่อมต่อ Orthanc ไม่ได้' : lastErr.message;
-      searchFailures.push({ date: day, message });
-      continue;
-    }
-
-    if (dayStudies.length > 0) {
-      const dicomDay = dayStudies[0].studyDate || day.replace(/-/g, '');
-      countByDate[dicomDay] = (countByDate[dicomDay] || 0) + dayStudies.length;
-      total += dayStudies.length;
-    }
-  }
-
-  if (total === 0 && searchFailures.length === dates.length) {
-    // ค้นหาไม่สำเร็จเลยสักวันเดียว (ไม่ใช่แค่ไม่เจอเคส) - นี่ถือเป็นปัญหาเชื่อมต่อจริง แจ้ง error
-    return res.status(502).json({
-      success: false,
-      message: searchFailures[0]?.message || 'เชื่อมต่อ Orthanc ไม่ได้ กรุณาตรวจสอบ Orthanc URL และเครือข่าย',
-    });
-  }
-
-  const days = Object.keys(countByDate)
-    .sort()
-    .map((date) => ({ date, count: countByDate[date] }));
-  res.json({ success: true, total, days, searchFailures });
-});
 
 router.post('/start', async (req, res) => {
   const {

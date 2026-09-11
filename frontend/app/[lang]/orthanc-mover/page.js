@@ -24,10 +24,6 @@ export default function OrthancMoverPage() {
   const [destRestPassword, setDestRestPassword] = useState('');
   const [concurrency, setConcurrency] = useState('');
 
-  const [previewing, setPreviewing] = useState(false);
-  const [previewStatus, setPreviewStatus] = useState({ text: '', type: 'info' });
-  const [previewDays, setPreviewDays] = useState(null);
-
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -59,34 +55,6 @@ export default function OrthancMoverPage() {
       return () => clearInterval(pollRef.current);
     }
   }, [jobState?.status, fetchStatus]);
-
-  async function handlePreview() {
-    if (!orthancUrl || !fromDate || !toDate) {
-      setPreviewStatus({ text: dict.missingFieldsError, type: 'error' });
-      return;
-    }
-    setPreviewing(true);
-    setPreviewStatus({ text: dict.previewingButton, type: 'info' });
-    setPreviewDays(null);
-    try {
-      const res = await fetch('/api/orthanc-mover/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orthancUrl, username, password, from: fromDate, to: toDate }),
-      });
-      const data = await res.json();
-      if (!data.success) {
-        setPreviewStatus({ text: data.message || dict.previewFailedError, type: 'error' });
-        return;
-      }
-      setPreviewDays(data.days);
-      setPreviewStatus({ text: dict.previewSummaryText(data.total, data.days.length), type: 'success' });
-    } catch (err) {
-      setPreviewStatus({ text: dict.connectErrorPrefix + err.message, type: 'error' });
-    } finally {
-      setPreviewing(false);
-    }
-  }
 
   async function handleStart() {
     if (!orthancUrl || !fromDate || !toDate || !destAet || !destHost || !destPort) {
@@ -301,9 +269,6 @@ export default function OrthancMoverPage() {
         </div>
 
         <div className="settings-actions">
-          <button onClick={handlePreview} disabled={previewing || isRunning}>
-            {previewing ? dict.previewingButton : dict.previewButton}
-          </button>
           <button onClick={handleStart} disabled={starting || isRunning}>
             {starting ? dict.startingButton : dict.startButton}
           </button>
@@ -323,32 +288,8 @@ export default function OrthancMoverPage() {
             </button>
           )}
         </div>
-        {previewStatus.text && <p className={`status-${previewStatus.type}`}>{previewStatus.text}</p>}
         {startStatus.text && <p className={`status-${startStatus.type}`}>{startStatus.text}</p>}
       </div>
-
-      {(!jobState || jobState.status === 'idle') && previewDays && previewDays.length > 0 && (
-        <div className="settings-card">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>{dict.previewTable.date}</th>
-                  <th>{dict.previewTable.count}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previewDays.map((d) => (
-                  <tr key={d.date}>
-                    <td>{d.date}</td>
-                    <td>{d.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {jobState && jobState.status !== 'idle' && (
         <div className="settings-card">
