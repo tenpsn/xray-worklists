@@ -18,7 +18,7 @@ const DEST_MODALITY_NAME = 'MOVER-DEST';
 
 const STORE_MAX_ATTEMPTS = 3;
 const STORE_RETRY_DELAY_MS = 1000;
-const DEFAULT_CONCURRENCY = 6;
+const DEFAULT_CONCURRENCY = 2;
 const DEFAULT_DEST_REST_PORT = 8042;
 // เชื่อมต่อสะดุดชั่วคราว (ไม่ใช่ Orthanc/ปลายทางตอบปฏิเสธ) - ลองใหม่ได้
 const RETRYABLE_ERROR_PATTERN = /fetch failed|ECONNREFUSED|ETIMEDOUT/i;

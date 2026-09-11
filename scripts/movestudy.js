@@ -98,7 +98,7 @@ Optional:
   --modality-name  Temporary modality name to register on the source (default: MOVER-CLI)
                     Letters/digits/dashes only (no "_") — some older Orthanc versions
                     reject underscores in modality names.
-  --concurrency  How many cases to send at once (default: 6). A slow/stuck case
+  --concurrency  How many cases to send at once (default: 2). A slow/stuck case
                  doesn't block the others.
   --dest-rest-url  REST API URL of the destination Orthanc, used to get a real yes/no
                    answer (by comparing image counts) instead of guessing when a case's
@@ -423,7 +423,7 @@ function sleep(ms) {
 
 const STORE_MAX_ATTEMPTS = 3;
 const STORE_RETRY_DELAY_MS = 1000;
-const DEFAULT_CONCURRENCY = 6;
+const DEFAULT_CONCURRENCY = 2;
 const DEFAULT_DEST_REST_PORT = 8042;
 
 function pad2(n) {

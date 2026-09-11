@@ -221,7 +221,7 @@ export default function OrthancMoverPage() {
           </label>
           <label>
             {dict.concurrencyLabel}
-            <input type="number" min="1" placeholder="6" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} />
+            <input type="number" min="1" placeholder="2" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} />
           </label>
         </div>
 
