@@ -10,12 +10,15 @@ services:
       # ต้องตรงกับ "ports:" ของ service orthanc ด้านล่าง - ใช้เตือนตอนตั้ง DICOM port ใหม่ไม่ตรงกับที่ publish ไว้
       - ORTHANC_PUBLISHED_DICOM_PORT=4242
       # ต้องตรงกับ "ports:" ของ service backend ด้านล่าง (พอร์ตสำรองสำหรับ MPPS) - ใช้เตือนตอนตั้ง MPPS port ที่ไม่ได้ publish ไว้
-      - BACKEND_PUBLISHED_MPPS_PORTS=7000,7001
+      - BACKEND_PUBLISHED_MPPS_PORTS=7001
+      # พอร์ต Worklist SCP แยกต่อ modality (worklistScpService.js) - ต้องตรงกับ "ports:" ด้านล่าง และ mwl.modalityPorts ใน backend/settings.json
+      - BACKEND_PUBLISHED_WORKLIST_PORTS=4243,4244
     ports:
       - "4000:4000"
       - "4001:4001"
-      - "7000:7000"
       - "7001:7001"
+      - "4243:4243"
+      - "4244:4244"
     volumes:
       - ./backend:/app
       - /app/node_modules

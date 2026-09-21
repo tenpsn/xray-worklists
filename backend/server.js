@@ -10,6 +10,7 @@ const orthancSync = require('./orthancSync');
 const settingsService = require('./settingsService');
 const db = require('./db');
 const Mppsservice = require('./Mppsservice');
+const worklistScpService = require('./worklistScpService');
 const hl7Service = require('./hl7Service');
 const orthancCleanerRoutes = require('./orthanc-cleaner/routes');
 const orthancMoverRoutes = require('./orthanc-mover/routes');
@@ -65,13 +66,14 @@ function handleMppsStatusChange(accessionNumber, status) {
   }
 }
 
-// เพิ่ม port MPPS ใหม่เข้า "ports:" ของ service backend + BACKEND_PUBLISHED_MPPS_PORTS ใน docker-compose.yml
-// ทำแบบ "เพิ่มต่อท้าย" ไม่ลบของเดิม (7000/7001 ยังอยู่เหมือนเดิม) ปลอดภัยกว่าการแทนที่ค่าเดียวแบบ DICOM port
-// เพราะพอร์ต MPPS มีได้หลายค่าให้เลือกอยู่แล้ว - อ่าน/เขียนจากไฟล์จริงเสมอ กันเพิ่มซ้ำถ้ายังไม่ได้ docker compose up -d
-function ensureBackendMppsPortPublished(desiredPort) {
+// sync พอร์ตของ env var หนึ่งตัว (BACKEND_PUBLISHED_MPPS_PORTS, BACKEND_PUBLISHED_WORKLIST_PORTS) ใน docker-compose.yml
+// ให้ตรงกับ desiredPorts เป๊ะ (เพิ่มที่ขาด + ลบที่เลิกใช้แล้ว) ต่างจาก DICOM port หลัก (ค่าเดียว ใช้ updateDockerComposePort แทนที่ตรงๆ)
+// เพราะพอร์ตพวกนี้เป็น list ที่มีได้หลายค่า ต้องไม่ให้พอร์ตเก่าที่เลิกใช้ไปแล้วค้าง publish อยู่เรื่อยๆ เวลาแก้/ลบแถวจากหน้าเว็บ
+// ลบเฉพาะพอร์ตที่ "เคยอยู่ใน list ของ envVarName ตัวนี้เท่านั้น" (อ่านจากไฟล์จริงก่อนแก้) กันไปลบพอร์ตของ feature อื่น (อีก env var/web) ที่บังเอิญเลขตรงกัน
+function syncPublishedPorts(desiredPorts, envVarName) {
   const composePath = orthancSync.getDockerComposeHostPath();
   if (!composePath) {
-    console.warn('[Server] ---> หา docker-compose.yml ไม่เจอ (PROJECT_HOST_PATH ไม่ถูกต้อง) ต้องเพิ่ม port MPPS ใน docker-compose.yml เอง');
+    console.warn(`[Server] ---> หา docker-compose.yml ไม่เจอ (PROJECT_HOST_PATH ไม่ถูกต้อง) ต้องแก้ ${envVarName} เอง`);
     return false;
   }
 
@@ -86,7 +88,7 @@ function ensureBackendMppsPortPublished(desiredPort) {
   const lines = text.split('\n');
   const backendStart = lines.findIndex((l) => /^\s{2}backend:\s*$/.test(l));
   if (backendStart === -1) {
-    console.warn('[Server] ---> หา service "backend:" ใน docker-compose.yml ไม่เจอ ต้องเพิ่ม port MPPS เอง');
+    console.warn(`[Server] ---> หา service "backend:" ใน docker-compose.yml ไม่เจอ ต้องแก้ ${envVarName} เอง`);
     return false;
   }
   let backendEnd = lines.length;
@@ -95,29 +97,38 @@ function ensureBackendMppsPortPublished(desiredPort) {
   }
 
   let envLineIdx = -1;
-  let currentPorts = [];
+  let oldPorts = [];
+  const envVarRegex = new RegExp(`${envVarName}=([0-9,]*)`);
   for (let i = backendStart; i < backendEnd; i++) {
-    const m = lines[i].match(/BACKEND_PUBLISHED_MPPS_PORTS=([0-9,]+)/);
-    if (m) { envLineIdx = i; currentPorts = m[1].split(',').filter(Boolean); break; }
+    const m = lines[i].match(envVarRegex);
+    if (m) { envLineIdx = i; oldPorts = m[1].split(',').filter(Boolean); break; }
   }
 
-  if (currentPorts.includes(String(desiredPort))) {
-    return false; // publish ไว้แล้ว (อาจแค่ยังไม่ได้ docker compose up -d) ไม่ต้องแก้ซ้ำ
+  const desired = [...new Set((desiredPorts || []).map((p) => String(p).trim()).filter(Boolean))];
+  const desiredSet = new Set(desired);
+  const oldSet = new Set(oldPorts);
+
+  const sameSet = oldPorts.length === desired.length && oldPorts.every((p) => desiredSet.has(p));
+  if (sameSet) {
+    return false; // ตรงกับที่ publish ไว้อยู่แล้ว ไม่ต้องแก้
   }
 
   if (envLineIdx !== -1) {
-    const newList = [...currentPorts, String(desiredPort)].join(',');
-    lines[envLineIdx] = lines[envLineIdx].replace(/BACKEND_PUBLISHED_MPPS_PORTS=[0-9,]+/, `BACKEND_PUBLISHED_MPPS_PORTS=${newList}`);
+    lines[envLineIdx] = lines[envLineIdx].replace(new RegExp(`${envVarName}=[0-9,]*`), `${envVarName}=${desired.join(',')}`);
   } else {
-    console.warn('[Server] ---> หา BACKEND_PUBLISHED_MPPS_PORTS ใน docker-compose.yml ไม่เจอ ต้องเพิ่มเอง');
+    console.warn(`[Server] ---> หา ${envVarName} ใน docker-compose.yml ไม่เจอ ต้องเพิ่มเอง`);
   }
+
+  const toRemove = oldPorts.filter((p) => !desiredSet.has(p));
+  const toAdd = desired.filter((p) => !oldSet.has(p));
 
   let portsStart = -1;
   for (let i = backendStart; i < backendEnd; i++) {
     if (/^\s{4}ports:\s*$/.test(lines[i])) { portsStart = i; break; }
   }
+
   if (portsStart === -1) {
-    console.warn('[Server] ---> หา "ports:" ของ service backend ใน docker-compose.yml ไม่เจอ ต้องเพิ่ม port MPPS เอง');
+    console.warn(`[Server] ---> หา "ports:" ของ service backend ใน docker-compose.yml ไม่เจอ ต้องแก้พอร์ตเอง`);
   } else {
     let lastPortLine = portsStart;
     for (let i = portsStart + 1; i < backendEnd; i++) {
@@ -127,12 +138,29 @@ function ensureBackendMppsPortPublished(desiredPort) {
         break;
       }
     }
-    lines.splice(lastPortLine + 1, 0, `      - "${desiredPort}:${desiredPort}"`);
+
+    // ลบบรรทัดของพอร์ตที่เลิกใช้แล้ว (เทียบเฉพาะช่วง portsStart..lastPortLine ของ service backend)
+    if (toRemove.length > 0) {
+      const removeSet = new Set(toRemove);
+      for (let i = lastPortLine; i >= portsStart + 1; i--) {
+        const m = lines[i].match(/^\s{6}-\s*"(\d+):(\d+)"\s*$/);
+        if (m && m[1] === m[2] && removeSet.has(m[1])) {
+          lines.splice(i, 1);
+          lastPortLine -= 1;
+        }
+      }
+    }
+
+    // เพิ่มพอร์ตใหม่ที่ยังไม่มี
+    toAdd.forEach((port) => {
+      lines.splice(lastPortLine + 1, 0, `      - "${port}:${port}"`);
+      lastPortLine += 1;
+    });
   }
 
   try {
     fs.writeFileSync(composePath, lines.join('\n'), 'utf8');
-    console.log(`[Server] ---> เพิ่ม port MPPS ${desiredPort} เข้า docker-compose.yml แล้ว (service backend)`);
+    console.log(`[Server] ---> sync ${envVarName} เป็น [${desired.join(',')}] แล้ว (เพิ่ม ${toAdd.length}, ลบ ${toRemove.length})`);
     return true;
   } catch (err) {
     console.error('[Server] ---> เขียน docker-compose.yml ไม่สำเร็จ:', err.message);
@@ -170,18 +198,17 @@ async function applySettings(settings, options = {}) {
   }
 
   // 2. MPPS server
+  // sync พอร์ต MPPS ให้ตรงกับที่ตั้งไว้ตอนนี้เป๊ะ (แทนที่ของเก่า ไม่ใช่แค่เพิ่มต่อท้าย) เหมือน Worklist ports ด้านล่าง
+  // ไม่มี mppsPort ตั้งไว้ = ไม่ต้อง publish พอร์ตอะไรเลย (desired = [])
+  const desiredMppsPorts = settings.mwl.mppsPort ? [settings.mwl.mppsPort] : [];
+  const mppsPortsChanged = syncPublishedPorts(desiredMppsPorts, 'BACKEND_PUBLISHED_MPPS_PORTS');
+  if (mppsPortsChanged) {
+    console.warn(
+      `[Server] ---> sync พอร์ต MPPS ใน docker-compose.yml ให้ตรงกับที่ตั้งไว้ตอนนี้แล้ว (${desiredMppsPorts.join(', ') || 'ไม่มี'}) ` +
+      'แต่ยังไม่มีผลจริงจนกว่าจะรัน "docker compose up -d" เอง (restart container เฉยๆ ไม่พอ เพราะ port ผูกไว้ตอน create)'
+    );
+  }
   if (settings.mwl.mppsPort) {
-    const publishedMppsPorts = (process.env.BACKEND_PUBLISHED_MPPS_PORTS || '')
-      .split(',')
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (publishedMppsPorts.length > 0 && !publishedMppsPorts.includes(String(settings.mwl.mppsPort))) {
-      ensureBackendMppsPortPublished(settings.mwl.mppsPort);
-      console.warn(
-        `[Server] ---> เพิ่ม port MPPS ${settings.mwl.mppsPort} เข้า docker-compose.yml ให้แล้ว ` +
-        'แต่ยังไม่มีผลจริงจนกว่าจะรัน "docker compose up -d" เอง (restart container เฉยๆ ไม่พอ เพราะ port ผูกไว้ตอน create)'
-      );
-    }
     try {
       await Mppsservice.startMppsServer(settings.mwl.mppsPort, handleMppsStatusChange);
     } catch (err) {
@@ -195,6 +222,33 @@ async function applySettings(settings, options = {}) {
   } else {
     Mppsservice.stopMppsServer();
     console.log('[Server] ---> ยังไม่ได้ตั้งค่า MPPS Port รอการตั้งค่าจากหน้าเว็บ');
+  }
+
+  // 2b. Worklist SCP แยกพอร์ตต่อ modality+ภาษา (สำหรับเครื่อง Modality ที่ตั้งค่า filter เองไม่ได้)
+  const modalityPorts = Array.isArray(settings.mwl.modalityPorts) ? settings.mwl.modalityPorts : [];
+  const desiredWorklistPorts = modalityPorts
+    .map((e) => e.port)
+    .filter((p) => p && String(p).trim() !== '')
+    .map(String);
+  // เรียก sync ทุกครั้ง (ไม่เช็ค process.env ก่อน เพราะ env คงที่ตลอดอายุ container ตั้งแต่ boot ใช้เทียบไม่ได้
+  // ถ้าไฟล์ถูกแก้ไปแล้วในรอบก่อนโดย container ยังไม่ถูก recreate - ให้ syncPublishedPorts เทียบกับไฟล์จริงเองแทน
+  // ฟังก์ชันนี้ no-op เองถ้าไฟล์ตรงกับที่ต้องการอยู่แล้ว ไม่เสียเวลาเขียนซ้ำ)
+  // แทนที่ของเก่า ไม่ใช่แค่เพิ่มต่อท้ายเหมือน MPPS port - ป้องกันพอร์ตค้างสะสมเรื่อยๆ เวลาแก้/ลบแถวจากหน้าเว็บ
+  const worklistPortsChanged = syncPublishedPorts(desiredWorklistPorts, 'BACKEND_PUBLISHED_WORKLIST_PORTS');
+  if (worklistPortsChanged) {
+    console.warn(
+      `[Server] ---> sync พอร์ต Worklist ใน docker-compose.yml ให้ตรงกับที่ตั้งไว้ตอนนี้แล้ว (${desiredWorklistPorts.join(', ') || 'ไม่มี'}) ` +
+      'แต่ยังไม่มีผลจริงจนกว่าจะรัน "docker compose up -d" เอง (restart container เฉยๆ ไม่พอ เพราะ port ผูกไว้ตอน create)'
+    );
+  }
+  try {
+    const failedPorts = await worklistScpService.applyModalityPorts(modalityPorts);
+    failedPorts.forEach(({ modality, lang, port, error }) => {
+      warnings.push(`เปิด Worklist SCP สำหรับ ${modality}${lang ? '/' + lang : ''} ที่พอร์ต ${port} ไม่สำเร็จ - ${error}`);
+    });
+  } catch (err) {
+    console.error('[Server] ---> เริ่ม Worklist SCP ไม่สำเร็จ:', err.message);
+    warnings.push(`เริ่ม Worklist SCP ไม่สำเร็จ - ${err.message}`);
   }
 
   // 3. เชื่อมต่อฐานข้อมูล HIS
@@ -246,10 +300,12 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('SIGINT', () => {
   Mppsservice.stopMppsServer();
+  worklistScpService.stopAllWorklistScpServers();
   process.exit(0);
 });
 process.on('SIGTERM', () => {
   Mppsservice.stopMppsServer();
+  worklistScpService.stopAllWorklistScpServers();
   process.exit(0);
 });
 

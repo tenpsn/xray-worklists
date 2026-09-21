@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const util = require('util');
+const execFileAsync = util.promisify(execFile);
 const iconv = require('iconv-lite');
 const romanizeModule = require('@dehoist/romanize-thai');
 const romanize = typeof romanizeModule === 'function' ? romanizeModule : romanizeModule.default;
@@ -209,12 +211,21 @@ function setWorklistDir(dirPath) {
   loadStateFromDisk();
   LOCALLY_CONFIRMED_FILE = path.join(WORKLIST_DIR, '.locally-confirmed.json');
   loadLocallyConfirmedFromDisk();
+  ensureDirExists(getLangVariantDir());
   console.log(`[DICOM Service] ---> ใช้งานโฟลเดอร์ worklists ที่: ${WORKLIST_DIR}`);
   return WORKLIST_DIR;
 }
 
 function getWorklistDir() {
   return WORKLIST_DIR;
+}
+
+// โฟลเดอร์เก็บไฟล์ .wl คู่ภาษา (.th.wl / .en.wl) ของทุกรายการ - เป็นโฟลเดอร์น้องของ WORKLIST_DIR เสมอ
+// อยู่ "นอก" path ที่ Orthanc ชี้ไปอ่านโดยตั้งใจ เพราะ Orthanc สแกนไฟล์ .wl ทุกไฟล์ในโฟลเดอร์ที่ตั้งไว้แบบไม่กรอง
+// (ไม่ได้ดูชื่อไฟล์) ถ้าใส่ไฟล์คู่ภาษาไว้ในโฟลเดอร์เดียวกัน Orthanc จะเห็นเป็นรายการซ้ำ 2 อัน
+// ใช้เฉพาะฝั่ง worklistScpService.js (พอร์ตแยกที่ระบุทั้ง modality และภาษา) เท่านั้น
+function getLangVariantDir() {
+  return `${WORKLIST_DIR}-lang`;
 }
 
 // สร้าง hash จากข้อมูลที่มีผลต่อเนื้อหาไฟล์ worklist เพื่อใช้เทียบว่าข้อมูลเปลี่ยนไปหรือยัง
@@ -304,6 +315,7 @@ function cleanupStaleWorklists() {
           }
           fs.unlinkSync(filePath);
           console.log(`[DICOM Service] ---> ลบไฟล์ worklist อายุเกิน ${WORKLIST_RETENTION_DAYS} วัน: ${file}`);
+          deleteLangVariants(file.slice(0, -3)); // ตัด ".wl" ท้ายไฟล์ออก ให้เหลือ accessionNumber ไปลบไฟล์คู่ภาษาตามด้วย
 
           const xn = fileNameToXn[file];
           if (xn && worklistState[xn] !== undefined) {
@@ -336,70 +348,30 @@ function ensureWorklistCleanupForToday() {
   cleanupStaleWorklists();
 }
 
-// สร้างไฟล์ Worklist (.dump และ .wl) สำหรับ Orthanc
-async function generateWorklistFile(item) {
-  ensureWorklistCleanupForToday(); // เช็คว่าเปลี่ยนวันปฏิทินหรือยัง ถ้าเปลี่ยนแล้วรัน cleanup ไฟล์ .wl ค้างไปด้วย
-  return new Promise((resolve, reject) => {
-    try {
-      const rawXn = item.xn || `XN${Date.now()}`;
-      const accessionNumber = sanitizeFileName(rawXn);
-      const safeFileName = accessionNumber;
+// สร้างเนื้อไฟล์ .dump จาก item + ธง useEnglish (ชื่อ-นามสกุล/คำนำหน้า/ชื่อแพทย์เปลี่ยนตามภาษา ฟิลด์อื่นเหมือนกันหมด)
+// แยกออกมาจาก generateWorklistFile เพื่อใช้ซ้ำได้ทั้งไฟล์หลัก (Orthanc) และไฟล์คู่ภาษา (.th.wl/.en.wl)
+function buildDumpContent(item, useEnglish, shared) {
+  const {
+    accessionNumber, patientId, studyInstanceUID,
+    studyDate, studyTime, dob, sex, stationAet, specificCharacterSet, procedureCode,
+  } = shared;
 
-      const rawPatientId = item.hn || 'UNKNOWN';
-      const patientId = sanitizeFileName(rawPatientId);
-      const useEnglish = item.lang === 'en';
+  const firstName = useEnglish ? safeRomanize(item.fname) : (item.fname || '');
+  const lastName = useEnglish ? safeRomanize(item.lname) : (item.lname || '');
+  const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
 
-      const firstName = useEnglish ? safeRomanize(item.fname) : (item.fname || '');
-      const lastName = useEnglish ? safeRomanize(item.lname) : (item.lname || '');
-      const doctorName = useEnglish ? romanizeDoctorName(item.Doctor) : (item.Doctor || '');
+  const showNamePrefix = loadSettings().mwl.showNamePrefix !== false;
+  const namePrefix = showNamePrefix
+    ? (useEnglish ? toEnglishPrefix(item.pname) : (item.pname || ''))
+    : '';
 
-      const showNamePrefix = loadSettings().mwl.showNamePrefix !== false;
-      const namePrefix = showNamePrefix
-        ? (useEnglish ? toEnglishPrefix(item.pname) : (item.pname || ''))
-        : '';
+  // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
+  // ภาษาอังกฤษเว้นวรรคคั่นคำนำหน้ากับชื่อ ส่วนภาษาไทยชนกัน
+  const patientName = namePrefix
+    ? `${namePrefix}${useEnglish ? ' ' : ''}${firstName}^${lastName}`
+    : `${firstName}^${lastName}`;
 
-      // แปลงชื่อ-นามสกุลให้อยู่ในรูปแบบ DICOM (Lastname^Firstname)
-      // ภาษาอังกฤษเว้นวรรคคั่นคำนำหน้ากับชื่อ ส่วนภาษาไทยชนกัน
-      const patientName = namePrefix
-        ? `${namePrefix}${useEnglish ? ' ' : ''}${firstName}^${lastName}`
-        : `${firstName}^${lastName}`;
-
-      // รหัสรายการ (xray_items_code) ใช้ทั้งใน RequestedProcedureID และ ScheduledProtocolCodeSequence>CodeValue
-      const procedureCode = item.xray_items_code || '';
-
-      // StudyInstanceUID ต้องคงที่ตลอดอายุของรายการนี้ ไม่สุ่มใหม่ทุกครั้งที่อัพเดทไฟล์
-      // เก็บลง state ทันที ไม่รอผล dump2dcm เผื่อรอบนี้ล้มเหลว รอบหน้าจะได้ใช้ตัวเดิมซ้ำ
-      const studyInstanceUID = getOrCreateStudyInstanceUID(accessionNumber);
-      if (!worklistState[accessionNumber] || worklistState[accessionNumber].studyInstanceUID !== studyInstanceUID) {
-        worklistState[accessionNumber] = { ...(worklistState[accessionNumber] || {}), studyInstanceUID };
-        saveState();
-      }
-
-      // ใช้ safeFileName เพื่อระบุชื่อไฟล์ในการตรวจสอบและสร้างไฟล์
-      const wlFileNameCheck = `${safeFileName}.wl`;
-      const wlFilePathCheck = path.join(WORKLIST_DIR, wlFileNameCheck);
-
-      // เทียบ hash ของข้อมูลกับครั้งล่าสุดที่สร้างไฟล์ ถ้าไม่เปลี่ยนและไฟล์ .wl ยังอยู่ครบไม่ต้องสร้างซ้ำ
-      const currentHash = computeItemHash(item);
-      const previousHash = getPreviousHash(accessionNumber);
-      if (previousHash === currentHash && fs.existsSync(wlFilePathCheck)) {
-        // console.log(`[DICOM Service] ---> ข้ามไฟล์ เพราะไม่มีการเปลี่ยนแปลง: ${wlFilePathCheck}`);
-        return resolve({ success: true, file: wlFilePathCheck, skipped: true });
-      }
-
-      const studyDate = formatDicomDate(item.StudyDate);
-      const studyTime = formatDicomTime(item.StudyTime);
-      const dob = formatDicomDate(item.birthday);
-      const sex = item.sex === '1' ? 'M' : item.sex === '2' ? 'F' : 'O';
-      const stationAet = loadSettings().mwl.aet || 'ORTHANC';
-
-      // เครื่อง Modality บางรุ่นไม่รองรับ UTF-8 (ISO_IR 192) เต็มรูปแบบ ทำให้ตัวอักษรไทยเพี้ยน
-      // ตั้งจากหน้าเว็บให้เปลี่ยนไปเข้ารหัส/ประกาศเป็น TIS620 (ISO_IR 166) แทนได้
-      const dicomCharset = loadSettings().mwl.dicomCharset === 'TIS620' ? 'TIS620' : 'UTF8';
-      const specificCharacterSet = dicomCharset === 'TIS620' ? 'ISO_IR 166' : 'ISO_IR 192';
-
-      // ตัวอย่างข้อมูล รูปแบบไฟล์ .dump
-      const dumpContent = `
+  return `
 (0008,0005) CS [${specificCharacterSet}] # Specific Character Set
 (0008,0050) SH [${accessionNumber}] # Accession Number
 (0008,0090) PN [${doctorName}] # Referring Physician's Name
@@ -426,53 +398,154 @@ async function generateWorklistFile(item) {
   (FFFE,E00D) na
 (FFFE,E0DD) na
       `.trim();
+}
 
-      // ใช้ safeFileName ในการสร้างไฟล์
-      const dumpFileName = `${safeFileName}.dump`;
-      const wlFileName = `${safeFileName}.wl`;
+// เขียน .dump แล้วแปลงเป็น .wl ด้วย dump2dcm - ใช้ร่วมกันทั้งไฟล์หลักและไฟล์คู่ภาษา
+async function writeDumpAndConvert(dumpContent, dicomCharset, dumpFilePath, wlFilePath) {
+  // TIS620 ต้อง encode เป็น single-byte เอง เพราะ dump2dcm ไม่แปลง encoding ให้ ใช้ byte ตรงจากไฟล์
+  if (dicomCharset === 'TIS620') {
+    fs.writeFileSync(dumpFilePath, iconv.encode(dumpContent, 'tis620'));
+  } else {
+    fs.writeFileSync(dumpFilePath, dumpContent, 'utf8');
+  }
 
-      const dumpFilePath = path.join(WORKLIST_DIR, dumpFileName);
-      const wlFilePath = path.join(WORKLIST_DIR, wlFileName);
+  // Windows: ใช้ dump2dcm.exe ที่แถมมากับโปรเจกต์ / Linux (Docker): ใช้ dcmtk ที่ลงผ่าน apt แทน
+  const dcmtkPath = process.platform === 'win32'
+    ? path.join(__dirname, 'dcmtk', 'bin', 'dump2dcm.exe')
+    : 'dump2dcm';
 
-      // 1. เขียนไฟล์ .dump
-      // TIS620 ต้อง encode เป็น single-byte เอง เพราะ dump2dcm ไม่แปลง encoding ให้ ใช้ byte ตรงจากไฟล์
-      if (dicomCharset === 'TIS620') {
-        fs.writeFileSync(dumpFilePath, iconv.encode(dumpContent, 'tis620'));
-      } else {
-        fs.writeFileSync(dumpFilePath, dumpContent, 'utf8');
-      }
+  try {
+    await execFileAsync(dcmtkPath, [dumpFilePath, wlFilePath]);
+  } catch (error) {
+    throw new Error(`แปลงไฟล์ .wl ไม่สำเร็จ: ${error.message}`);
+  }
+  safeDeleteDumpFile(dumpFilePath);
+}
 
-      // 2. ใช้คำสั่ง dump2dcm เพื่อแปลง .dump เป็น .wl
-      // Windows: ใช้ dump2dcm.exe ที่แถมมากับโปรเจกต์ / Linux (Docker): ใช้ dcmtk ที่ลงผ่าน apt แทน
-      const dcmtkPath = process.platform === 'win32'
-        ? path.join(__dirname, 'dcmtk', 'bin', 'dump2dcm.exe')
-        : 'dump2dcm';
-      execFile(dcmtkPath, [dumpFilePath, wlFilePath], (error, stdout, stderr) => {
-        try {
-          if (error) {
-            console.error(`[DICOM Service] ---> ไม่สามารถแปลงไฟล์ .wl ได้ (ยังไม่มีไฟล์ worklist ให้เครื่อง Modality): ${error.message}`);
-            // ต้อง reject ให้ผู้เรียกรู้ว่ายังไม่เสร็จจริง ไม่งั้นจะถูกนับว่าสำเร็จทั้งที่ไม่มีไฟล์ .wl
-            return reject(new Error(`แปลงไฟล์ .wl ไม่สำเร็จ: ${error.message}`));
-          }
+// สร้างไฟล์คู่ภาษา (.th.wl / .en.wl) ของ 1 รายการไว้ในโฟลเดอร์แยก (getLangVariantDir) ให้ worklistScpService.js
+// ใช้กรองพอร์ตที่ระบุทั้ง modality และภาษา - ถ้าภาษานั้นตรงกับไฟล์หลักที่สร้างไปแล้ว (item.lang) อยู่แล้ว
+// แค่ copy ไฟล์หลักไปใช้ ไม่ต้องเรียก dump2dcm ซ้ำให้เสียเวลา
+// (encoding ต่อพอร์ตทำไม่ได้จริง - dcmjs-dimse ที่ worklistScpService.js ใช้ไม่รองรับ SpecificCharacterSet เลย
+// ส่งกลับเป็น UTF-8 เสมอไม่ว่าไฟล์ต้นทางจะเป็น TIS620 แค่ไหน จึงยังใช้ dicomCharset ตัวเดียวกับไฟล์หลัก/global เท่านั้น)
+async function writeLangVariants(item, dicomCharset, shared, primaryWlFilePath, primaryUseEnglish) {
+  const langDir = getLangVariantDir();
+  ensureDirExists(langDir);
+  const { accessionNumber } = shared;
 
-          // ลบไฟล์ .dump ทิ้งเมื่อสร้าง .wl สำเร็จ
-          safeDeleteDumpFile(dumpFilePath);
+  const variants = [
+    { lang: 'th', useEnglish: false },
+    { lang: 'en', useEnglish: true },
+  ];
 
-          // บันทึก hash ไว้เทียบรอบหน้า (StudyInstanceUID เก็บไปแล้วตั้งแต่ก่อนเรียก dump2dcm ด้านบน)
-          worklistState[accessionNumber] = { ...worklistState[accessionNumber], hash: currentHash, studyInstanceUID };
-          saveState();
+  await Promise.all(variants.map(async ({ lang, useEnglish }) => {
+    const targetWlPath = path.join(langDir, `${accessionNumber}.${lang}.wl`);
+    if (useEnglish === primaryUseEnglish) {
+      fs.copyFileSync(primaryWlFilePath, targetWlPath);
+      return;
+    }
+    const dumpContent = buildDumpContent(item, useEnglish, shared);
+    const dumpFilePath = path.join(langDir, `${accessionNumber}.${lang}.dump`);
+    await writeDumpAndConvert(dumpContent, dicomCharset, dumpFilePath, targetWlPath);
+  }));
+}
 
-          console.log(`[DICOM Service] ---> สร้าง/อัพเดทไฟล์ Worklist สำเร็จ: ${wlFilePath}`);
-          resolve({ success: true, file: wlFilePath });
-        } catch (cbErr) {
-          console.error('[DICOM Service] ---> Error inside exec callback:', cbErr);
-          resolve({ success: true, file: dumpFilePath, message: 'Completed with warning' });
-        }
-      });
+// สร้างไฟล์ Worklist (.dump และ .wl) สำหรับ Orthanc + ไฟล์คู่ภาษา (.th.wl/.en.wl) สำหรับ worklistScpService.js
+async function generateWorklistFile(item) {
+  ensureWorklistCleanupForToday(); // เช็คว่าเปลี่ยนวันปฏิทินหรือยัง ถ้าเปลี่ยนแล้วรัน cleanup ไฟล์ .wl ค้างไปด้วย
 
+  const rawXn = item.xn || `XN${Date.now()}`;
+  const accessionNumber = sanitizeFileName(rawXn);
+  const safeFileName = accessionNumber;
+
+  const rawPatientId = item.hn || 'UNKNOWN';
+  const patientId = sanitizeFileName(rawPatientId);
+  const useEnglish = item.lang === 'en';
+
+  // รหัสรายการ (xray_items_code) ใช้ทั้งใน RequestedProcedureID และ ScheduledProtocolCodeSequence>CodeValue
+  const procedureCode = item.xray_items_code || '';
+
+  // StudyInstanceUID ต้องคงที่ตลอดอายุของรายการนี้ ไม่สุ่มใหม่ทุกครั้งที่อัพเดทไฟล์
+  // เก็บลง state ทันที ไม่รอผล dump2dcm เผื่อรอบนี้ล้มเหลว รอบหน้าจะได้ใช้ตัวเดิมซ้ำ
+  const studyInstanceUID = getOrCreateStudyInstanceUID(accessionNumber);
+  if (!worklistState[accessionNumber] || worklistState[accessionNumber].studyInstanceUID !== studyInstanceUID) {
+    worklistState[accessionNumber] = { ...(worklistState[accessionNumber] || {}), studyInstanceUID };
+    saveState();
+  }
+
+  // ใช้ safeFileName เพื่อระบุชื่อไฟล์ในการตรวจสอบและสร้างไฟล์
+  const wlFilePathCheck = path.join(WORKLIST_DIR, `${safeFileName}.wl`);
+  const langDir = getLangVariantDir();
+  const thPathCheck = path.join(langDir, `${accessionNumber}.th.wl`);
+  const enPathCheck = path.join(langDir, `${accessionNumber}.en.wl`);
+
+  // เทียบ hash ของข้อมูลกับครั้งล่าสุดที่สร้างไฟล์ ถ้าไม่เปลี่ยนและไฟล์ .wl ครบทั้งไฟล์หลักและคู่ภาษาแล้วไม่ต้องสร้างซ้ำ
+  const currentHash = computeItemHash(item);
+  const previousHash = getPreviousHash(accessionNumber);
+  if (
+    previousHash === currentHash &&
+    fs.existsSync(wlFilePathCheck) &&
+    fs.existsSync(thPathCheck) &&
+    fs.existsSync(enPathCheck)
+  ) {
+    // console.log(`[DICOM Service] ---> ข้ามไฟล์ เพราะไม่มีการเปลี่ยนแปลง: ${wlFilePathCheck}`);
+    return { success: true, file: wlFilePathCheck, skipped: true };
+  }
+
+  const studyDate = formatDicomDate(item.StudyDate);
+  const studyTime = formatDicomTime(item.StudyTime);
+  const dob = formatDicomDate(item.birthday);
+  const sex = item.sex === '1' ? 'M' : item.sex === '2' ? 'F' : 'O';
+  const stationAet = loadSettings().mwl.aet || 'ORTHANC';
+
+  // เครื่อง Modality บางรุ่นไม่รองรับ UTF-8 (ISO_IR 192) เต็มรูปแบบ ทำให้ตัวอักษรไทยเพี้ยน
+  // ตั้งจากหน้าเว็บให้เปลี่ยนไปเข้ารหัส/ประกาศเป็น TIS620 (ISO_IR 166) แทนได้
+  const dicomCharset = loadSettings().mwl.dicomCharset === 'TIS620' ? 'TIS620' : 'UTF8';
+  const specificCharacterSet = dicomCharset === 'TIS620' ? 'ISO_IR 166' : 'ISO_IR 192';
+
+  const shared = {
+    accessionNumber, patientId, studyInstanceUID,
+    studyDate, studyTime, dob, sex, stationAet, specificCharacterSet, procedureCode,
+  };
+
+  const dumpFilePath = path.join(WORKLIST_DIR, `${safeFileName}.dump`);
+  const wlFilePath = path.join(WORKLIST_DIR, `${safeFileName}.wl`);
+
+  try {
+    const dumpContent = buildDumpContent(item, useEnglish, shared);
+    await writeDumpAndConvert(dumpContent, dicomCharset, dumpFilePath, wlFilePath);
+
+    // บันทึก hash ไว้เทียบรอบหน้า (StudyInstanceUID เก็บไปแล้วตั้งแต่ก่อนเรียก dump2dcm ด้านบน)
+    worklistState[accessionNumber] = { ...worklistState[accessionNumber], hash: currentHash, studyInstanceUID };
+    saveState();
+
+    console.log(`[DICOM Service] ---> สร้าง/อัพเดทไฟล์ Worklist สำเร็จ: ${wlFilePath}`);
+  } catch (err) {
+    console.error(`[DICOM Service] ---> ไม่สามารถแปลงไฟล์ .wl ได้ (ยังไม่มีไฟล์ worklist ให้เครื่อง Modality): ${err.message}`);
+    // ต้อง throw ให้ผู้เรียกรู้ว่ายังไม่เสร็จจริง ไม่งั้นจะถูกนับว่าสำเร็จทั้งที่ไม่มีไฟล์ .wl
+    throw err;
+  }
+
+  // สร้างไฟล์คู่ภาษาตามหลัง - พลาดแค่ log เตือน ไม่ทำให้ทั้งรายการ fail เพราะไฟล์หลักที่ Orthanc ใช้สำเร็จไปแล้ว
+  try {
+    await writeLangVariants(item, dicomCharset, shared, wlFilePath, useEnglish);
+  } catch (langErr) {
+    console.error(`[DICOM Service] ---> สร้างไฟล์คู่ภาษา (.th.wl/.en.wl) ไม่สำเร็จสำหรับ ${accessionNumber}:`, langErr.message);
+  }
+
+  return { success: true, file: wlFilePath };
+}
+
+// ลบไฟล์คู่ภาษา (.th.wl/.en.wl) ของ accession นี้ทิ้งด้วย ถ้ามี (เพิกเฉยถ้าไม่มี)
+function deleteLangVariants(accessionNumber) {
+  const langDir = getLangVariantDir();
+  ['th', 'en'].forEach((lang) => {
+    const filePath = path.join(langDir, `${accessionNumber}.${lang}.wl`);
+    try {
+      fs.unlinkSync(filePath);
     } catch (err) {
-      console.error('[DICOM Service] ---> Error generating worklist:', err);
-      reject(err);
+      if (err.code !== 'ENOENT') {
+        console.warn(`[DICOM Service] ---> ลบไฟล์คู่ภาษาไม่สำเร็จ: ${filePath}`, err.message);
+      }
     }
   });
 }
@@ -489,6 +562,7 @@ function deleteWorklistFile(xn) {
       console.error(`[DICOM Service] ---> ลบไฟล์ไม่สำเร็จ: ${safeFileName}.wl`, err);
     }
   }
+  deleteLangVariants(safeFileName);
 
   // ล้าง state ทิ้งด้วย โดยลบทั้งรูปแบบที่มี / และ - เพื่อความชัวร์
   let stateChanged = false;
@@ -508,6 +582,7 @@ function deleteWorklistFile(xn) {
 
 // เตรียมโฟลเดอร์ default ไว้ตั้งแต่ตอนโหลดโมดูล เผื่อยังไม่มีการเรียก setWorklistDir
 ensureDirExists(WORKLIST_DIR);
+ensureDirExists(getLangVariantDir());
 loadStateFromDisk();
 loadLocallyConfirmedFromDisk();
 ensureWorklistCleanupForToday();
@@ -518,6 +593,7 @@ module.exports = {
   cleanupStaleWorklists,
   setWorklistDir,
   getWorklistDir,
+  getLangVariantDir,
   sanitizeFileName,
   markLocallyConfirmed,
   isLocallyConfirmed

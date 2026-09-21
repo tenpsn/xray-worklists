@@ -25,6 +25,8 @@ const DEFAULT_FORM = {
     modalityAlwaysAllow: true, // true = allow ทุกเครื่อง query worklist ได้ (ค่าเริ่มต้น), false = ต้องลงทะเบียนเครื่องใน modalities เท่านั้น
     modalities: [], // [{ aet, ip, port }] ใช้ตอน modalityAlwaysAllow เป็น false เท่านั้น เพิ่มได้หลายแถว
     modalityGroupOverride: {}, // { [hisSystem]: { [groupId]: modality } } แก้ทับค่าเดา built-in ของแต่ละ group
+    modalityTypes: ['CR', 'US', 'CT', 'MR', 'MG', 'IO', 'ECG'], // รายการรหัส Modality ที่เลือกได้ในหน้านี้ (จัดกลุ่ม Modality + พอร์ต Worklist) แก้ไขได้จากหน้าเว็บ
+    modalityPorts: [], // [{ modality, lang, port }] เปิด Worklist SCP แยกพอร์ตต่อ modality+ภาษา สำหรับเครื่องที่ตั้ง filter เองไม่ได้ (worklistScpService.js)
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
@@ -52,6 +54,12 @@ export default function SettingsPage() {
   const [modalityGroups, setModalityGroups] = useState([]);
   const [modalityGroupsNote, setModalityGroupsNote] = useState('');
 
+  // แถวสำหรับแก้ mwl.modalityPorts ([{ modality, lang, port }])
+  const [modalityPortRows, setModalityPortRows] = useState([]);
+
+  // ช่องกรอกรหัส Modality ใหม่ที่จะเพิ่มเข้า mwl.modalityTypes
+  const [newModalityType, setNewModalityType] = useState('');
+
   // state สำหรับหน้าต่างเลือกโฟลเดอร์ worklists
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -72,6 +80,11 @@ export default function SettingsPage() {
             his: { ...DEFAULT_FORM.his, ...json.settings.his },
             mwl: { ...DEFAULT_FORM.mwl, ...json.settings.mwl, modalityAlwaysAllow: true },
           });
+          setModalityPortRows(
+            Array.isArray(json.settings.mwl.modalityPorts)
+              ? json.settings.mwl.modalityPorts.map((r) => ({ modality: r.modality || '', lang: r.lang || '', port: r.port || '' }))
+              : []
+          );
           setWorklistDirActive(json.worklistDirActive || '');
           setStatus(dict.statusLoaded);
           setStatusType('info');
@@ -157,6 +170,36 @@ export default function SettingsPage() {
         modalities: prev.mwl.modalities.map((m, i) => (i === index ? { ...m, [field]: value } : m)),
       },
     }));
+  }
+
+  // เพิ่มรหัส Modality ใหม่เข้า mwl.modalityTypes (ใช้เลือกได้ทั้งหัวข้อจัดกลุ่ม Modality และพอร์ต Worklist)
+  function addModalityType() {
+    const code = newModalityType.trim().toUpperCase();
+    if (!code) return;
+    setForm((prev) => {
+      if (prev.mwl.modalityTypes.includes(code)) return prev;
+      return { ...prev, mwl: { ...prev.mwl, modalityTypes: [...prev.mwl.modalityTypes, code] } };
+    });
+    setNewModalityType('');
+  }
+
+  function removeModalityType(code) {
+    setForm((prev) => ({
+      ...prev,
+      mwl: { ...prev.mwl, modalityTypes: prev.mwl.modalityTypes.filter((c) => c !== code) },
+    }));
+  }
+
+  function addModalityPortRow() {
+    setModalityPortRows((prev) => [...prev, { modality: '', lang: '', port: '' }]);
+  }
+
+  function removeModalityPortRow(index) {
+    setModalityPortRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateModalityPortRow(index, field, value) {
+    setModalityPortRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   }
 
   // แก้ modality ของ group
@@ -270,8 +313,13 @@ export default function SettingsPage() {
     setStatus(dict.savingStatus);
     setStatusType('info');
     try {
+      // ตัดแถวที่ยังไม่เลือก modality หรือยังไม่กรอกพอร์ตออกก่อนบันทึก
+      const modalityPorts = modalityPortRows
+        .filter((r) => r.modality && String(r.modality).trim() && r.port && String(r.port).trim())
+        .map((r) => ({ modality: String(r.modality).trim().toUpperCase(), lang: r.lang || '', port: r.port }));
+
       // เข้ามาที่หน้านี้แล้วกด Save ถือว่าเลือกภาษาเว็บแน่ชัดแล้ว (เผื่อมาจาก bookmark เก่าที่ข้ามหน้าเลือกภาษาไป)
-      const payload = { ...form, mwl: { ...form.mwl, uiLangConfirmed: true } };
+      const payload = { ...form, mwl: { ...form.mwl, uiLangConfirmed: true, modalityPorts } };
       const res = await fetch(`/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -472,7 +520,6 @@ export default function SettingsPage() {
               <option value="TIS620">{dict.dicomCharsetTis620Option}</option>
             </select>
           </label>
-          <p className="field-note" style={{ gridColumn: '1 / -1' }}>{dict.dicomCharsetNote}</p>
 
           <label>
             {dict.showNamePrefixLabel}
@@ -603,8 +650,109 @@ export default function SettingsPage() {
       </div>
 
       <div className="settings-card">
+        <h2>{dict.modalityTypesSectionTitle}</h2>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+          {form.mwl.modalityTypes.map((code) => (
+            <span
+              key={code}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                padding: '4px 6px 4px 10px', borderRadius: '999px',
+                border: '1px solid #ccc', background: '#f9fafb', fontSize: '13px',
+              }}
+            >
+              {code}
+              <button
+                type="button"
+                onClick={() => removeModalityType(code)}
+                title={dict.removeModalityButton}
+                style={{
+                  border: 'none', background: 'transparent', cursor: 'pointer',
+                  color: '#6b7280', fontSize: '14px', lineHeight: 1, padding: '0 2px',
+                }}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder={dict.modalityTypesNewPlaceholder}
+            value={newModalityType}
+            onChange={(e) => setNewModalityType(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addModalityType(); } }}
+            style={{
+              width: '140px', fontFamily: 'inherit', fontSize: '13px',
+              padding: '6px 8px', border: '1px solid #ccc', borderRadius: '4px',
+            }}
+          />
+          <button type="button" onClick={addModalityType}>{dict.addModalityTypeButton}</button>
+        </div>
+      </div>
+
+      <div className="settings-card">
+        <h2>{dict.modalityPortsSectionTitle}</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {modalityPortRows.map((r, i) => (
+            <div key={i} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select
+                value={r.modality}
+                onChange={(e) => updateModalityPortRow(i, 'modality', e.target.value)}
+                style={{
+                  fontFamily: 'inherit',
+                  fontSize: '13px',
+                  padding: '6px 8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  background: 'white',
+                }}
+              >
+                <option value="" disabled>{dict.modalityPortsModalityPlaceholder}</option>
+                {form.mwl.modalityTypes.map((code) => (
+                  <option key={code} value={code}>{code}</option>
+                ))}
+              </select>
+              <select
+                value={r.lang}
+                onChange={(e) => updateModalityPortRow(i, 'lang', e.target.value)}
+                style={{
+                  fontFamily: 'inherit',
+                  fontSize: '13px',
+                  padding: '6px 8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  background: 'white',
+                }}
+              >
+                <option value="" disabled>{dict.modalityPortsLangPlaceholder}</option>
+                <option value="th">{dict.uiLangThOption}</option>
+                <option value="en">{dict.uiLangEnOption}</option>
+              </select>
+              <input
+                type="text"
+                placeholder={dict.modalityPortsPortPlaceholder}
+                value={r.port}
+                onChange={(e) => updateModalityPortRow(i, 'port', e.target.value)}
+                style={{
+                  width: '90px',
+                  fontFamily: 'inherit',
+                  fontSize: '13px',
+                  padding: '6px 8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                }}
+              />
+              <button type="button" onClick={() => removeModalityPortRow(i)}>{dict.removeModalityButton}</button>
+            </div>
+          ))}
+          <button type="button" onClick={addModalityPortRow} style={{ alignSelf: 'flex-start' }}>{dict.addModalityPortButton}</button>
+        </div>
+      </div>
+
+      <div className="settings-card">
         <h2>{dict.modalityGroupSectionTitle}</h2>
-        <p className="field-note">{dict.modalityGroupHint}</p>
         {modalityGroupsNote && <p className="field-note" style={{ color: '#b91c1c' }}>{modalityGroupsNote}</p>}
         {modalityGroups.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -624,13 +772,9 @@ export default function SettingsPage() {
                   }}
                 >
                   <option value="">--</option>
-                  <option value="CR">CR</option>
-                  <option value="US">US</option>
-                  <option value="CT">CT</option>
-                  <option value="MR">MR</option>
-                  <option value="MG">MG</option>
-                  <option value="IO">IO</option>
-                  <option value="ECG">ECG</option>
+                  {form.mwl.modalityTypes.map((code) => (
+                    <option key={code} value={code}>{code}</option>
+                  ))}
                 </select>
               </div>
             ))}

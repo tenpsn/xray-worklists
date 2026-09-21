@@ -3,9 +3,12 @@ node_modules
 
 backend/logs/
 backend/worklists/
+backend/worklists-lang/
 backend/mpps-state.json
 backend/settings.json
 backend/orthanc-mover/mover-state.json
 backend/orthanc-mover/mover-plan/
 
 frontend/.next/
+
+orthanc-data/

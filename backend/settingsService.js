@@ -33,8 +33,15 @@ const DEFAULT_SETTINGS = {
     // false = ปิดหมด ต้องลงทะเบียนเครื่อง Modality ทีละแถวใน modalities ด้านล่างเท่านั้นถึงจะ query ได้
     modalityAlwaysAllow: true,
     modalities: [], // [{ aet, ip, port }] รายการเครื่อง Modality ที่ลงทะเบียนไว้ (ลงทะเบียนใน DicomModalities), เพิ่มได้หลายแถว
+    // รายการรหัส Modality ที่เลือกได้ในหน้าเว็บ (ทั้งหัวข้อจัดกลุ่ม Modality และพอร์ต Worklist แยกตามประเภทเครื่อง)
+    // แก้ไข/เพิ่มได้จากหน้า Settings เอง ไม่ต้องแก้โค้ด - ค่าเริ่มต้นคือ 7 ตัวที่ระบบรองรับมาแต่ต้น
+    modalityTypes: ['CR', 'US', 'CT', 'MR', 'MG', 'IO', 'ECG'],
     // groupId: modality แก้ทับค่าเดา built-in ตอนที่ รพ.นี้ตั้งเลข group ใน HIS ไม่ตรงกับที่โค้ดเดาไว้
     modalityGroupOverride: {},
+    // [{ modality, lang, port }] เช่น [{modality:'CR', lang:'th', port:'4243'}, {modality:'CR', lang:'en', port:'4250'}]
+    // เปิด Worklist SCP แยกพอร์ตต่อ modality+ภาษา (worklistScpService.js) ใช้กับเครื่อง Modality ที่ตั้งค่า filter/AE Title เองไม่ได้
+    // lang ว่าง = ไม่กรองภาษา (พฤติกรรมเดิมก่อนรองรับภาษา) ไม่ระบุแถว = ไม่เปิดพอร์ตนั้น (ค่าเริ่มต้นว่างทั้งหมด ไม่กระทบระบบเดิม)
+    modalityPorts: [],
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
     autoGenerate: {
       intervalSec: Number(process.env.AUTO_GENERATE_INTERVAL_SEC) || 10,
@@ -61,13 +68,27 @@ function migrateLegacyModality(savedMwl) {
   };
 }
 
+// รองรับ modalityPorts รูปแบบเก่า { [modalityCode]: port } (ก่อนรองรับแยกตามภาษา)
+// แปลงเป็น [{ modality, lang: '', port }] แถวละ modality - lang ว่าง = ไม่กรองภาษา เหมือนพฤติกรรมเดิม
+function migrateLegacyModalityPorts(savedMwl) {
+  if (!savedMwl || !savedMwl.modalityPorts || Array.isArray(savedMwl.modalityPorts)) {
+    return savedMwl;
+  }
+  return {
+    ...savedMwl,
+    modalityPorts: Object.entries(savedMwl.modalityPorts).map(([modality, port]) => ({
+      modality, lang: '', port,
+    })),
+  };
+}
+
 function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
       return {
         his: { ...DEFAULT_SETTINGS.his, ...(saved.his || {}) },
-        mwl: { ...DEFAULT_SETTINGS.mwl, ...migrateLegacyModality(saved.mwl || {}) },
+        mwl: { ...DEFAULT_SETTINGS.mwl, ...migrateLegacyModalityPorts(migrateLegacyModality(saved.mwl || {})) },
       };
     }
   } catch (err) {
