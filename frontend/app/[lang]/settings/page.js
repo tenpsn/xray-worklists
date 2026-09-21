@@ -26,7 +26,7 @@ const DEFAULT_FORM = {
     modalities: [], // [{ aet, ip, port }] ใช้ตอน modalityAlwaysAllow เป็น false เท่านั้น เพิ่มได้หลายแถว
     modalityGroupOverride: {}, // { [hisSystem]: { [groupId]: modality } } แก้ทับค่าเดา built-in ของแต่ละ group
     modalityTypes: ['CR', 'US', 'CT', 'MR', 'MG', 'IO', 'ECG'], // รายการรหัส Modality ที่เลือกได้ในหน้านี้ (จัดกลุ่ม Modality + พอร์ต Worklist) แก้ไขได้จากหน้าเว็บ
-    modalityPorts: [], // [{ modality, lang, port }] เปิด Worklist SCP แยกพอร์ตต่อ modality+ภาษา สำหรับเครื่องที่ตั้ง filter เองไม่ได้ (worklistScpService.js)
+    modalityPorts: [], // [{ modality, lang, charset, port }] เปิด Worklist SCP แยกพอร์ตต่อ modality+ภาษา+encoding สำหรับเครื่องที่ตั้ง filter เองไม่ได้ (worklistScpService.js)
     worklistDir: '', // โฟลเดอร์เก็บไฟล์ .wl — เว้นว่าง = ใช้ backend/worklists
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
@@ -54,7 +54,7 @@ export default function SettingsPage() {
   const [modalityGroups, setModalityGroups] = useState([]);
   const [modalityGroupsNote, setModalityGroupsNote] = useState('');
 
-  // แถวสำหรับแก้ mwl.modalityPorts ([{ modality, lang, port }])
+  // แถวสำหรับแก้ mwl.modalityPorts ([{ modality, lang, charset, port }])
   const [modalityPortRows, setModalityPortRows] = useState([]);
 
   // ช่องกรอกรหัส Modality ใหม่ที่จะเพิ่มเข้า mwl.modalityTypes
@@ -82,7 +82,7 @@ export default function SettingsPage() {
           });
           setModalityPortRows(
             Array.isArray(json.settings.mwl.modalityPorts)
-              ? json.settings.mwl.modalityPorts.map((r) => ({ modality: r.modality || '', lang: r.lang || '', port: r.port || '' }))
+              ? json.settings.mwl.modalityPorts.map((r) => ({ modality: r.modality || '', lang: r.lang || '', charset: r.charset === 'TIS620' ? 'TIS620' : 'UTF8', port: r.port || '' }))
               : []
           );
           setWorklistDirActive(json.worklistDirActive || '');
@@ -191,7 +191,7 @@ export default function SettingsPage() {
   }
 
   function addModalityPortRow() {
-    setModalityPortRows((prev) => [...prev, { modality: '', lang: '', port: '' }]);
+    setModalityPortRows((prev) => [...prev, { modality: '', lang: '', charset: 'UTF8', port: '' }]);
   }
 
   function removeModalityPortRow(index) {
@@ -316,7 +316,7 @@ export default function SettingsPage() {
       // ตัดแถวที่ยังไม่เลือก modality หรือยังไม่กรอกพอร์ตออกก่อนบันทึก
       const modalityPorts = modalityPortRows
         .filter((r) => r.modality && String(r.modality).trim() && r.port && String(r.port).trim())
-        .map((r) => ({ modality: String(r.modality).trim().toUpperCase(), lang: r.lang || '', port: r.port }));
+        .map((r) => ({ modality: String(r.modality).trim().toUpperCase(), lang: r.lang || '', charset: r.charset === 'TIS620' ? 'TIS620' : 'UTF8', port: r.port }));
 
       // เข้ามาที่หน้านี้แล้วกด Save ถือว่าเลือกภาษาเว็บแน่ชัดแล้ว (เผื่อมาจาก bookmark เก่าที่ข้ามหน้าเลือกภาษาไป)
       const payload = { ...form, mwl: { ...form.mwl, uiLangConfirmed: true, modalityPorts } };
@@ -729,6 +729,22 @@ export default function SettingsPage() {
                 <option value="" disabled>{dict.modalityPortsLangPlaceholder}</option>
                 <option value="th">{dict.uiLangThOption}</option>
                 <option value="en">{dict.uiLangEnOption}</option>
+              </select>
+              <select
+                value={r.charset}
+                onChange={(e) => updateModalityPortRow(i, 'charset', e.target.value)}
+                style={{
+                  fontFamily: 'inherit',
+                  fontSize: '13px',
+                  padding: '6px 8px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  background: 'white',
+                }}
+              >
+                <option value="" disabled>{dict.modalityPortsCharsetPlaceholder}</option>
+                <option value="UTF8">{dict.dicomCharsetUtf8Option}</option>
+                <option value="TIS620">{dict.dicomCharsetTis620Option}</option>
               </select>
               <input
                 type="text"

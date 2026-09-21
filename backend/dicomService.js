@@ -220,12 +220,23 @@ function getWorklistDir() {
   return WORKLIST_DIR;
 }
 
-// โฟลเดอร์เก็บไฟล์ .wl คู่ภาษา (.th.wl / .en.wl) ของทุกรายการ - เป็นโฟลเดอร์น้องของ WORKLIST_DIR เสมอ
+// โฟลเดอร์เก็บไฟล์ .wl คู่ภาษา+encoding ของทุกรายการ - เป็นโฟลเดอร์น้องของ WORKLIST_DIR เสมอ
 // อยู่ "นอก" path ที่ Orthanc ชี้ไปอ่านโดยตั้งใจ เพราะ Orthanc สแกนไฟล์ .wl ทุกไฟล์ในโฟลเดอร์ที่ตั้งไว้แบบไม่กรอง
 // (ไม่ได้ดูชื่อไฟล์) ถ้าใส่ไฟล์คู่ภาษาไว้ในโฟลเดอร์เดียวกัน Orthanc จะเห็นเป็นรายการซ้ำ 2 อัน
-// ใช้เฉพาะฝั่ง worklistScpService.js (พอร์ตแยกที่ระบุทั้ง modality และภาษา) เท่านั้น
+// ใช้เฉพาะฝั่ง worklistScpService.js (พอร์ตแยกที่ระบุทั้ง modality/ภาษา/encoding) เท่านั้น
 function getLangVariantDir() {
   return `${WORKLIST_DIR}-lang`;
+}
+
+// 'UTF8' -> 'utf8' (ISO_IR 192) / 'TIS620' -> 'tis620' (ISO_IR 166) - ใช้ตั้งชื่อไฟล์ variant ให้อ่านง่าย
+function charsetFileSuffix(dicomCharset) {
+  return dicomCharset === 'TIS620' ? 'tis620' : 'utf8';
+}
+
+// path ของไฟล์คู่ภาษา+encoding 1 ชุด เช่น {accession}.th.tis620.wl - ใช้ร่วมกันทั้งตอนเขียน (dicomService.js)
+// และตอนอ่าน (worklistScpService.js หาไฟล์ตาม modality/lang/charset ที่พอร์ตนั้นตั้งไว้)
+function getLangVariantFilePath(accessionNumber, lang, dicomCharset) {
+  return path.join(getLangVariantDir(), `${accessionNumber}.${lang}.${charsetFileSuffix(dicomCharset)}.wl`);
 }
 
 // สร้าง hash จากข้อมูลที่มีผลต่อเนื้อหาไฟล์ worklist เพื่อใช้เทียบว่าข้อมูลเปลี่ยนไปหรือยัง
@@ -422,30 +433,32 @@ async function writeDumpAndConvert(dumpContent, dicomCharset, dumpFilePath, wlFi
   safeDeleteDumpFile(dumpFilePath);
 }
 
-// สร้างไฟล์คู่ภาษา (.th.wl / .en.wl) ของ 1 รายการไว้ในโฟลเดอร์แยก (getLangVariantDir) ให้ worklistScpService.js
-// ใช้กรองพอร์ตที่ระบุทั้ง modality และภาษา - ถ้าภาษานั้นตรงกับไฟล์หลักที่สร้างไปแล้ว (item.lang) อยู่แล้ว
-// แค่ copy ไฟล์หลักไปใช้ ไม่ต้องเรียก dump2dcm ซ้ำให้เสียเวลา
-// (encoding ต่อพอร์ตทำไม่ได้จริง - dcmjs-dimse ที่ worklistScpService.js ใช้ไม่รองรับ SpecificCharacterSet เลย
-// ส่งกลับเป็น UTF-8 เสมอไม่ว่าไฟล์ต้นทางจะเป็น TIS620 แค่ไหน จึงยังใช้ dicomCharset ตัวเดียวกับไฟล์หลัก/global เท่านั้น)
+// สร้างไฟล์คู่ภาษา+encoding (.th.utf8.wl / .th.tis620.wl / .en.utf8.wl / .en.tis620.wl) ของ 1 รายการ
+// ไว้ในโฟลเดอร์แยก (getLangVariantDir) ให้ worklistScpService.js ใช้ตอบพอร์ตที่ระบุ modality+ภาษา+encoding
+// สร้างครบทั้ง 4 ชุดเสมอ (ไม่รู้ล่วงหน้าว่า port ไหนตั้ง encoding อะไรไว้บ้าง) - ชุดที่ตรงกับไฟล์หลักที่สร้างไปแล้ว
+// (ภาษา+encoding เดียวกับ item.lang/dicomCharset) แค่ copy ไฟล์หลักไปใช้ ไม่ต้องเรียก dump2dcm ซ้ำให้เสียเวลา
 async function writeLangVariants(item, dicomCharset, shared, primaryWlFilePath, primaryUseEnglish) {
   const langDir = getLangVariantDir();
   ensureDirExists(langDir);
   const { accessionNumber } = shared;
 
   const variants = [
-    { lang: 'th', useEnglish: false },
-    { lang: 'en', useEnglish: true },
+    { lang: 'th', useEnglish: false, charset: 'UTF8' },
+    { lang: 'th', useEnglish: false, charset: 'TIS620' },
+    { lang: 'en', useEnglish: true, charset: 'UTF8' },
+    { lang: 'en', useEnglish: true, charset: 'TIS620' },
   ];
 
-  await Promise.all(variants.map(async ({ lang, useEnglish }) => {
-    const targetWlPath = path.join(langDir, `${accessionNumber}.${lang}.wl`);
-    if (useEnglish === primaryUseEnglish) {
+  await Promise.all(variants.map(async ({ lang, useEnglish, charset }) => {
+    const targetWlPath = getLangVariantFilePath(accessionNumber, lang, charset);
+    if (useEnglish === primaryUseEnglish && charset === dicomCharset) {
       fs.copyFileSync(primaryWlFilePath, targetWlPath);
       return;
     }
-    const dumpContent = buildDumpContent(item, useEnglish, shared);
-    const dumpFilePath = path.join(langDir, `${accessionNumber}.${lang}.dump`);
-    await writeDumpAndConvert(dumpContent, dicomCharset, dumpFilePath, targetWlPath);
+    const specificCharacterSet = charset === 'TIS620' ? 'ISO_IR 166' : 'ISO_IR 192';
+    const dumpContent = buildDumpContent(item, useEnglish, { ...shared, specificCharacterSet });
+    const dumpFilePath = path.join(langDir, `${accessionNumber}.${lang}.${charsetFileSuffix(charset)}.dump`);
+    await writeDumpAndConvert(dumpContent, charset, dumpFilePath, targetWlPath);
   }));
 }
 
@@ -474,18 +487,20 @@ async function generateWorklistFile(item) {
 
   // ใช้ safeFileName เพื่อระบุชื่อไฟล์ในการตรวจสอบและสร้างไฟล์
   const wlFilePathCheck = path.join(WORKLIST_DIR, `${safeFileName}.wl`);
-  const langDir = getLangVariantDir();
-  const thPathCheck = path.join(langDir, `${accessionNumber}.th.wl`);
-  const enPathCheck = path.join(langDir, `${accessionNumber}.en.wl`);
+  const variantPathChecks = [
+    getLangVariantFilePath(accessionNumber, 'th', 'UTF8'),
+    getLangVariantFilePath(accessionNumber, 'th', 'TIS620'),
+    getLangVariantFilePath(accessionNumber, 'en', 'UTF8'),
+    getLangVariantFilePath(accessionNumber, 'en', 'TIS620'),
+  ];
 
-  // เทียบ hash ของข้อมูลกับครั้งล่าสุดที่สร้างไฟล์ ถ้าไม่เปลี่ยนและไฟล์ .wl ครบทั้งไฟล์หลักและคู่ภาษาแล้วไม่ต้องสร้างซ้ำ
+  // เทียบ hash ของข้อมูลกับครั้งล่าสุดที่สร้างไฟล์ ถ้าไม่เปลี่ยนและไฟล์ .wl ครบทั้งไฟล์หลักและคู่ภาษา+encoding ครบ 4 ชุดแล้วไม่ต้องสร้างซ้ำ
   const currentHash = computeItemHash(item);
   const previousHash = getPreviousHash(accessionNumber);
   if (
     previousHash === currentHash &&
     fs.existsSync(wlFilePathCheck) &&
-    fs.existsSync(thPathCheck) &&
-    fs.existsSync(enPathCheck)
+    variantPathChecks.every((p) => fs.existsSync(p))
   ) {
     // console.log(`[DICOM Service] ---> ข้ามไฟล์ เพราะไม่มีการเปลี่ยนแปลง: ${wlFilePathCheck}`);
     return { success: true, file: wlFilePathCheck, skipped: true };
@@ -529,24 +544,25 @@ async function generateWorklistFile(item) {
   try {
     await writeLangVariants(item, dicomCharset, shared, wlFilePath, useEnglish);
   } catch (langErr) {
-    console.error(`[DICOM Service] ---> สร้างไฟล์คู่ภาษา (.th.wl/.en.wl) ไม่สำเร็จสำหรับ ${accessionNumber}:`, langErr.message);
+    console.error(`[DICOM Service] ---> สร้างไฟล์คู่ภาษา+encoding ไม่สำเร็จสำหรับ ${accessionNumber}:`, langErr.message);
   }
 
   return { success: true, file: wlFilePath };
 }
 
-// ลบไฟล์คู่ภาษา (.th.wl/.en.wl) ของ accession นี้ทิ้งด้วย ถ้ามี (เพิกเฉยถ้าไม่มี)
+// ลบไฟล์คู่ภาษา+encoding ทั้ง 4 ชุดของ accession นี้ทิ้งด้วย ถ้ามี (เพิกเฉยถ้าไม่มี)
 function deleteLangVariants(accessionNumber) {
-  const langDir = getLangVariantDir();
   ['th', 'en'].forEach((lang) => {
-    const filePath = path.join(langDir, `${accessionNumber}.${lang}.wl`);
-    try {
-      fs.unlinkSync(filePath);
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        console.warn(`[DICOM Service] ---> ลบไฟล์คู่ภาษาไม่สำเร็จ: ${filePath}`, err.message);
+    ['UTF8', 'TIS620'].forEach((charset) => {
+      const filePath = getLangVariantFilePath(accessionNumber, lang, charset);
+      try {
+        fs.unlinkSync(filePath);
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          console.warn(`[DICOM Service] ---> ลบไฟล์คู่ภาษาไม่สำเร็จ: ${filePath}`, err.message);
+        }
       }
-    }
+    });
   });
 }
 
@@ -594,6 +610,7 @@ module.exports = {
   setWorklistDir,
   getWorklistDir,
   getLangVariantDir,
+  getLangVariantFilePath,
   sanitizeFileName,
   markLocallyConfirmed,
   isLocallyConfirmed

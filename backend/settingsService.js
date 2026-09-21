@@ -38,8 +38,9 @@ const DEFAULT_SETTINGS = {
     modalityTypes: ['CR', 'US', 'CT', 'MR', 'MG', 'IO', 'ECG'],
     // groupId: modality แก้ทับค่าเดา built-in ตอนที่ รพ.นี้ตั้งเลข group ใน HIS ไม่ตรงกับที่โค้ดเดาไว้
     modalityGroupOverride: {},
-    // [{ modality, lang, port }] เช่น [{modality:'CR', lang:'th', port:'4243'}, {modality:'CR', lang:'en', port:'4250'}]
-    // เปิด Worklist SCP แยกพอร์ตต่อ modality+ภาษา (worklistScpService.js) ใช้กับเครื่อง Modality ที่ตั้งค่า filter/AE Title เองไม่ได้
+    // [{ modality, lang, charset, port }] เช่น [{modality:'CR', lang:'th', charset:'TIS620', port:'4243'}]
+    // เปิด Worklist SCP แยกพอร์ตต่อ modality+ภาษา+encoding (worklistScpService.js) ใช้กับเครื่อง Modality ที่ตั้งค่า filter/AE Title เองไม่ได้
+    // charset: 'UTF8' (ISO_IR 192) | 'TIS620' (ISO_IR 166) - เลือกได้อิสระต่อพอร์ต ไม่ผูกกับ dicomCharset ตัว global ด้านบน
     // lang ว่าง = ไม่กรองภาษา (พฤติกรรมเดิมก่อนรองรับภาษา) ไม่ระบุแถว = ไม่เปิดพอร์ตนั้น (ค่าเริ่มต้นว่างทั้งหมด ไม่กระทบระบบเดิม)
     modalityPorts: [],
     worklistDir: process.env.WORKLIST_DIR || '', // โฟลเดอร์เก็บไฟล์ .wl ที่ Orthanc หรือเครื่อง Modality จะมาอ่าน default คือ backend/worklists
@@ -69,16 +70,28 @@ function migrateLegacyModality(savedMwl) {
 }
 
 // รองรับ modalityPorts รูปแบบเก่า { [modalityCode]: port } (ก่อนรองรับแยกตามภาษา)
-// แปลงเป็น [{ modality, lang: '', port }] แถวละ modality - lang ว่าง = ไม่กรองภาษา เหมือนพฤติกรรมเดิม
+// แปลงเป็น [{ modality, lang: '', charset, port }] แถวละ modality - lang ว่าง = ไม่กรองภาษา เหมือนพฤติกรรมเดิม
+// และเติม charset ให้แถวเก่าที่ยังไม่มี (ก่อนรองรับเลือก encoding ต่อพอร์ต) - ใช้ dicomCharset ตัว global เดิมเป็นค่าเริ่มต้น
+// ให้พฤติกรรมเหมือนก่อนอัพเดท (ตอนนั้นทุกพอร์ตใช้ encoding เดียวกับ global อยู่แล้ว)
 function migrateLegacyModalityPorts(savedMwl) {
-  if (!savedMwl || !savedMwl.modalityPorts || Array.isArray(savedMwl.modalityPorts)) {
-    return savedMwl;
+  if (!savedMwl || !savedMwl.modalityPorts) return savedMwl;
+  const fallbackCharset = savedMwl.dicomCharset === 'TIS620' ? 'TIS620' : 'UTF8';
+
+  if (!Array.isArray(savedMwl.modalityPorts)) {
+    return {
+      ...savedMwl,
+      modalityPorts: Object.entries(savedMwl.modalityPorts).map(([modality, port]) => ({
+        modality, lang: '', charset: fallbackCharset, port,
+      })),
+    };
   }
+
+  const hasMissingCharset = savedMwl.modalityPorts.some((e) => !e.charset);
+  if (!hasMissingCharset) return savedMwl;
+
   return {
     ...savedMwl,
-    modalityPorts: Object.entries(savedMwl.modalityPorts).map(([modality, port]) => ({
-      modality, lang: '', port,
-    })),
+    modalityPorts: savedMwl.modalityPorts.map((e) => ({ ...e, charset: e.charset || fallbackCharset })),
   };
 }
 
