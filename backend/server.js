@@ -470,30 +470,42 @@ function resolveModalityForGroup(hisSystem, groupId, groupName) {
 }
 
 // ไม่มีตาราง group ให้เลย (Gateway ยี่ห้อนี้ไม่มี table แบบ HOSxP/SoftCon) ปล่อย Modality ว่างไว้ ให้ dicomService fallback เป็น CR ตามเดิม
+// hl7: ตาราง xray_items/xray_items_group เป็นของ "แถม" เฉพาะบาง Gateway ยี่ห้อ (ไม่ใช่ spec มาตรฐาน) ไม่รับประกันว่ามีจริง
+// ถ้า query สองตัวนี้ล้มเหลว (ตารางไม่มี) ต้องไม่ throw ต่อ ไม่งั้นทั้ง request/auto-gen cycle จะพังไปด้วย (ไม่มีไฟล์ .wl ออกเลย)
+// เก็บ Modality ที่ hl7Service.js parse จาก OBR-24 มาให้ไว้ก่อนแล้วเป็นค่าสำรอง (records ที่ส่งเข้ามาอาจมี record.Modality ตั้งไว้แล้ว)
+// hosxp/softcon: ตารางพวกนี้เป็นตารางแกนของระบบเอง รับประกันว่ามีเสมอ - error ตรงนี้คือความผิดปกติจริง ต้อง throw ต่อเหมือนเดิม
 async function applyModalityMapping(records) {
   const hisSystem = currentSettings.his.hisSystem;
   const catalogQuery = MODALITY_GROUP_CATALOG_QUERY[hisSystem];
   if (!catalogQuery) return records;
 
-  // HL7: ต้อง join xray_items_code -> xray_items_group เองก่อน (query ของ HOSxP/SoftCon คืน group มาให้พร้อมอยู่แล้ว ไม่ต้องทำขั้นนี้)
-  const itemGroupQuery = ITEM_GROUP_BY_CODE_QUERY[hisSystem];
-  if (itemGroupQuery) {
-    const itemGroupResult = await db.query(itemGroupQuery);
-    const groupByCode = {};
-    itemGroupResult.rows.forEach((r) => { groupByCode[String(r.code)] = r.group_id; });
+  try {
+    // HL7: ต้อง join xray_items_code -> xray_items_group เองก่อน (query ของ HOSxP/SoftCon คืน group มาให้พร้อมอยู่แล้ว ไม่ต้องทำขั้นนี้)
+    const itemGroupQuery = ITEM_GROUP_BY_CODE_QUERY[hisSystem];
+    if (itemGroupQuery) {
+      const itemGroupResult = await db.query(itemGroupQuery);
+      const groupByCode = {};
+      itemGroupResult.rows.forEach((r) => { groupByCode[String(r.code)] = r.group_id; });
+      records.forEach((record) => {
+        record.xray_items_group = groupByCode[String(record.xray_items_code)];
+      });
+    }
+
+    const catalogResult = await db.query(catalogQuery);
+    const nameById = {};
+    catalogResult.rows.forEach((r) => { nameById[String(r.id)] = r.name; });
+
     records.forEach((record) => {
-      record.xray_items_group = groupByCode[String(record.xray_items_code)];
+      const resolved = resolveModalityForGroup(hisSystem, record.xray_items_group, nameById[String(record.xray_items_group)]);
+      if (resolved) record.Modality = resolved;
     });
+  } catch (err) {
+    if (hisSystem !== 'hl7') throw err;
+    console.warn(
+      `[Worklist] ---> หาตาราง xray_items_group ของ HL7 ไม่สำเร็จ (Gateway นี้อาจไม่มีตารางนี้ให้): ${err.message} ` +
+      'ใช้ Modality จาก OBR-24 ที่แกะไว้แล้วแทน (ถ้าไม่มีค่า dicomService จะ fallback เป็น CR ตามเดิม)'
+    );
   }
-
-  const catalogResult = await db.query(catalogQuery);
-  const nameById = {};
-  catalogResult.rows.forEach((r) => { nameById[String(r.id)] = r.name; });
-
-  records.forEach((record) => {
-    const resolved = resolveModalityForGroup(hisSystem, record.xray_items_group, nameById[String(record.xray_items_group)]);
-    if (resolved) record.Modality = resolved;
-  });
   return records;
 }
 

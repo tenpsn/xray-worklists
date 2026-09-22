@@ -67,8 +67,10 @@ function parsehl7ToWorklistItem(hl7Data) {
   // component แรกเป็นรหัสหมอ (ID) ตัดทิ้ง เหลือแต่ชื่อให้เหมือน mode อื่น
   const doctorParts = (obr[16] || orc[12] || '').split('^');
   const doctorName = (doctorParts.slice(1).join(' ') || doctorParts[0] || '').trim();
-  // OBR.24 บางไซต์ส่งเป็น "code^text" ไม่ใช่ DICOM code เดี่ยว เชื่อไม่ได้ ปล่อยว่างให้ dicomService fallback เป็น CR เหมือน hosxp/softcon
-  const modality = '';
+  // OBR.24 = Modality Code ตาม spec (ยืนยันจาก BMS PACs Gateway spec + ตัวอย่างจริงว่าส่งเป็นโค้ดเดี่ยว เช่น "CR")
+  // บางไซต์อาจส่งเป็น "code^text" เอาแค่ component แรกไว้กันเผื่อ - ใช้เป็นค่าสำรองตอน server.js หา group จากตาราง
+  // xray_items_group ไม่เจอ/ตารางไม่มี (ดู applyModalityMapping) ถ้า resolve จากตารางได้จะถูกเขียนทับอีกที ตารางแม่นกว่า
+  const modality = (obr[24] || '').split('^')[0].trim().toUpperCase();
   // OBR.18 แผนก บางไซต์ส่งแค่รหัส บางไซต์ส่ง "รหัส^ชื่อแผนก" เอาชื่อถ้ามี ไม่มีก็ใช้รหัสแทน
   const deptInfo = (obr[18] || '').split('^');
   const department = deptInfo[1] || deptInfo[0] || '';

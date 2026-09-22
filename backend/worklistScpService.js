@@ -47,14 +47,83 @@ function stripMetaHeader(buffer) {
   return buffer.slice(datasetStart);
 }
 
+// VR ที่ใช้ header แบบยาว (tag 4 + VR 2 + reserved 2 + length 4) ตาม DICOM PS3.5 - นอกนั้นใช้ header สั้น (tag 4 + VR 2 + length 2)
+const LONG_FORM_EXPLICIT_VRS = new Set(['OB', 'OW', 'OF', 'OD', 'OL', 'OV', 'SQ', 'SV', 'UC', 'UN', 'UR', 'UT', 'UV']);
+
+// แปลง content ข้างใน 1 sequence (ชุดของ Item) จาก Explicit VR เป็น Implicit VR
+// ตัว Item wrapper เอง (tag+length 8 byte) เหมือนกันทั้ง Implicit/Explicit ไม่ต้องแก้ แต่ element ข้างในแต่ละ Item
+// เป็น Explicit VR อยู่ ต้องแปลงซ้ำแบบเดียวกับระดับบนสุด (เรียก convertExplicitElementsToImplicit ซ้ำ)
+// หมายเหตุ: รองรับเฉพาะ sequence/item แบบ definite-length (ไม่มี delimitation item) ตรงกับที่ dump2dcm สร้างให้จริง
+function convertExplicitSequenceItemsToImplicit(buffer) {
+  const chunks = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const itemTag = buffer.slice(offset, offset + 4); // (FFFE,E000)
+    const itemLength = buffer.readUInt32LE(offset + 4);
+    const itemContent = buffer.slice(offset + 8, offset + 8 + itemLength);
+    offset += 8 + itemLength;
+
+    const convertedContent = convertExplicitElementsToImplicit(itemContent);
+    const header = Buffer.alloc(8);
+    itemTag.copy(header, 0);
+    header.writeUInt32LE(convertedContent.length, 4);
+    chunks.push(header, convertedContent);
+  }
+  return Buffer.concat(chunks);
+}
+
+// แปลงชุด element ระดับหนึ่ง (ทั้ง dataset ระดับบนสุด หรือข้างใน 1 item ของ sequence) จาก Explicit VR LE เป็น Implicit VR LE
+// byte ของ "ค่า" (value) แต่ละ element ไม่ถูกแตะ/แปลงเลย - แค่เปลี่ยน header ให้ไม่มี VR + length เป็น 4 byte เสมอ
+// (ตาม format ของ Implicit VR) รักษา charset/เนื้อหาเดิมไว้ 100% ไม่ผ่าน dcmjs หรือ string encode/decode ใดๆ ทั้งสิ้น
+function convertExplicitElementsToImplicit(buffer) {
+  const chunks = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const tag = buffer.slice(offset, offset + 4);
+    const vr = buffer.toString('ascii', offset + 4, offset + 6);
+    let length;
+    let valueStart;
+    if (LONG_FORM_EXPLICIT_VRS.has(vr)) {
+      length = buffer.readUInt32LE(offset + 8);
+      valueStart = offset + 12;
+    } else {
+      length = buffer.readUInt16LE(offset + 6);
+      valueStart = offset + 8;
+    }
+    const rawValue = buffer.slice(valueStart, valueStart + length);
+    offset = valueStart + length;
+
+    const convertedValue = vr === 'SQ' ? convertExplicitSequenceItemsToImplicit(rawValue) : rawValue;
+
+    const header = Buffer.alloc(8);
+    tag.copy(header, 0);
+    header.writeUInt32LE(convertedValue.length, 4);
+    chunks.push(header, convertedValue);
+  }
+  return Buffer.concat(chunks);
+}
+
 // สร้าง object จำลอง Dataset ของ dcmjs-dimse สำหรับใช้เป็น response โดยเฉพาะ - มีแค่ method ที่โค้ดเขียน PDU
 // ของ dcmjs-dimse เรียกใช้จริง (getDenaturalizedDataset) คืน byte ดิบจากไฟล์ตรงๆ ไม่ผ่านการ decode/encode ของ dcmjs เลย
-function buildRawDatasetResponse(filePath) {
+//
+// negotiatedTransferSyntaxUid: transfer syntax ที่ negotiate ได้จริงตอน associationRequested (ดู createWorklistScpClass)
+// ไฟล์บนดิสก์เป็น Explicit VR Little Endian เสมอ (dump2dcm เขียนแบบนี้เสมอ) ถ้า negotiate ได้เป็น Implicit VR Little Endian
+// แทน ต้องแปลง byte จริงๆ ก่อนส่ง (ไม่ใช่แค่เปลี่ยน label) ไม่งั้นเครื่องปลายทางจะ parse ผิด (คนละ format กันจริง)
+// ที่ต้องทำแบบนี้เพราะ dcmjs-dimse เอง "แปลงให้อัตโนมัติ" เฉพาะตอน dataset เป็น class Dataset จริงเท่านั้น (เรียก getElements()
+// ซึ่ง object จำลองของเราไม่มี) ถ้าปล่อยให้ dcmjs-dimse พยายามแปลงเองจะ error (ยืนยันจาก log จริงตอน DROC ต่อเข้ามา)
+function buildRawDatasetResponse(filePath, negotiatedTransferSyntaxUid) {
   const raw = fs.readFileSync(filePath);
-  const datasetBuffer = stripMetaHeader(raw);
+  let datasetBuffer = stripMetaHeader(raw);
+  let transferSyntaxUid = TransferSyntax.ExplicitVRLittleEndian;
+
+  if (negotiatedTransferSyntaxUid === TransferSyntax.ImplicitVRLittleEndian) {
+    datasetBuffer = convertExplicitElementsToImplicit(datasetBuffer);
+    transferSyntaxUid = TransferSyntax.ImplicitVRLittleEndian;
+  }
+
   return {
     getDenaturalizedDataset: () => datasetBuffer,
-    getTransferSyntaxUid: () => TransferSyntax.ExplicitVRLittleEndian,
+    getTransferSyntaxUid: () => transferSyntaxUid,
   };
 }
 
@@ -128,16 +197,24 @@ function createWorklistScpClass(modalityCode, lang, charset) {
           abstractSyntax === SopClass.ModalityWorklistInformationModelFind
         ) {
           const transferSyntaxes = context.getTransferSyntaxUids();
-          transferSyntaxes.forEach((ts) => {
-            if (
-              ts === TransferSyntax.ImplicitVRLittleEndian ||
-              ts === TransferSyntax.ExplicitVRLittleEndian
-            ) {
-              context.setResult(PresentationContextResult.Accept, ts);
-            } else {
-              context.setResult(PresentationContextResult.RejectTransferSyntaxesNotSupported);
-            }
-          });
+          // ไฟล์บนดิสก์เป็น Explicit VR Little Endian เสมอ - เลือกอันนี้ก่อนถ้าเครื่องเสนอมาด้วย จะได้ไม่ต้องแปลง byte เลย
+          // (ถ้าเลือก Implicit ต้องแปลง byte จริงก่อนส่ง ดู convertExplicitElementsToImplicit/buildRawDatasetResponse)
+          const hasExplicit = transferSyntaxes.includes(TransferSyntax.ExplicitVRLittleEndian);
+          const chosenTs = hasExplicit
+            ? TransferSyntax.ExplicitVRLittleEndian
+            : transferSyntaxes.includes(TransferSyntax.ImplicitVRLittleEndian)
+              ? TransferSyntax.ImplicitVRLittleEndian
+              : null;
+
+          if (chosenTs) {
+            context.setResult(PresentationContextResult.Accept, chosenTs);
+          } else {
+            context.setResult(PresentationContextResult.RejectTransferSyntaxesNotSupported);
+          }
+
+          if (abstractSyntax === SopClass.ModalityWorklistInformationModelFind) {
+            this.acceptedFindTransferSyntaxUid = chosenTs;
+          }
         } else {
           context.setResult(PresentationContextResult.RejectAbstractSyntaxNotSupported);
         }
@@ -158,7 +235,7 @@ function createWorklistScpClass(modalityCode, lang, charset) {
           const responses = entries.map(({ filePath }) => {
             const response = CFindResponse.fromRequest(request);
             // ใช้ byte ดิบจากไฟล์ตรงๆ (ไม่ผ่าน dcmjs) กัน charset เพี้ยนเป็น UTF-8 เสมอ - ดู comment หัวไฟล์
-            response.setDataset(buildRawDatasetResponse(filePath));
+            response.setDataset(buildRawDatasetResponse(filePath, this.acceptedFindTransferSyntaxUid));
             response.setStatus(Status.Pending);
             return response;
           });
