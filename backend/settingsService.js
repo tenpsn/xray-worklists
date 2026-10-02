@@ -51,6 +51,8 @@ const DEFAULT_SETTINGS = {
       exclude: process.env.AUTO_GENERATE_EXCLUDE || '',
       confirm: process.env.AUTO_GENERATE_CONFIRM === 'true' || false,
       confirmLogic: process.env.AUTO_GENERATE_CONFIRM_LOGIC || 'both',
+      // HOSxP เท่านั้น: true = ต้องกดรับตัว (xray_report.accept_date มีค่า) ก่อนถึงจะสร้างไฟล์ .wl
+      requireAccept: process.env.AUTO_GENERATE_REQUIRE_ACCEPT === 'true' || false,
     },
   },
 };

@@ -6,6 +6,13 @@ import Link from 'next/link';
 import { formatNameField, formatPrefixField, formatDoctorField } from '../../lib/nameDisplay';
 import { getDictionary, formatDbError } from '../../lib/i18n';
 
+// pg ส่ง date มาเป็น Date แล้ว JSON แปลงเป็น ISO แบบ UTC (เวลาไทยจะถอยไป 1 วัน) - แปลงกลับเป็นวันที่ตามเวลาเครื่องผู้ใช้
+function formatAcceptDate(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString('en-CA');
+}
+
 export default function Page() {
   const { lang: rawLang } = useParams();
   const lang = rawLang === 'th' ? 'th' : 'en';
@@ -52,12 +59,17 @@ export default function Page() {
   const [filmConfirmedXNs, setFilmConfirmedXNs] = useState(new Set());
   const [confirmingXn, setConfirmingXn] = useState(null);
   const [showNamePrefix, setShowNamePrefix] = useState(true);
+  const [showAccepted, setShowAccepted] = useState(false);
 
   useEffect(() => {
     fetch(`/api/settings`)
       .then((res) => res.json())
       .then((json) => {
-        if (json.success) setShowNamePrefix(json.settings.mwl.showNamePrefix !== false);
+        if (json.success) {
+          setShowNamePrefix(json.settings.mwl.showNamePrefix !== false);
+          // คอลัมน์ "รับตัว" แสดงเฉพาะ HOSxP ที่เปิด requireAccept (สร้าง .wl ต่อเมื่อรับตัวแล้ว)
+          setShowAccepted(json.settings.his?.hisSystem === 'hosxp' && json.settings.mwl.autoGenerate?.requireAccept === true);
+        }
       })
       .catch(() => {});
   }, []);
@@ -108,13 +120,15 @@ export default function Page() {
       const xns_NN = [];
       const xns_YN = [];
       const xns_NY = [];
+      const xns_NN_accepted = []; // N,N แต่รับตัวแล้ว - ไม่ต้องดึงซ้ำตอน accept_date มีค่า (ไม่งั้นจะดึงแถวเดิมทุกรอบ)
 
       loadedXNsMap.current.forEach((statusObj, xn) => {
         existingXNs.push(xn);
         const c = statusObj.confirm;
         const crf = statusObj.confirm_read_film;
 
-        if (c === 'N' && crf === 'N') xns_NN.push(xn);
+        if (c === 'N' && crf === 'N' && statusObj.accepted === 'Y') xns_NN_accepted.push(xn);
+        else if (c === 'N' && crf === 'N') xns_NN.push(xn);
         else if (c === 'Y' && crf === 'N') xns_YN.push(xn);
         else if (c === 'N' && crf === 'Y') xns_NY.push(xn);
       });
@@ -129,7 +143,8 @@ export default function Page() {
         existingXNs,
         xns_NN,
         xns_YN,
-        xns_NY
+        xns_NY,
+        xns_NN_accepted
       };
 
       const res = await fetch(`/api/xray-report`, {
@@ -163,7 +178,8 @@ export default function Page() {
       for (const row of json.data) {
         const currentStatus = {
           confirm: row.confirm ?? 'N',
-          confirm_read_film: row.confirm_read_film ?? 'N'
+          confirm_read_film: row.confirm_read_film ?? 'N',
+          accepted: row.accepted ?? 'N'
         };
 
         if (loadedXNsMap.current.has(row.xn)) {
@@ -306,6 +322,7 @@ export default function Page() {
               <th>{dict.table.studyTime}</th>
               <th>{dict.table.group}</th>
               <th>{dict.table.modality}</th>
+              {showAccepted && <th>{dict.table.accepted}</th>}
               <th>{dict.table.confirmResult}</th>
               <th>{dict.table.confirmFilm}</th>
               <th>{dict.table.doctor}</th>
@@ -332,6 +349,11 @@ export default function Page() {
                 <td>{row.StudyTime ?? ''}</td>
                 <td>{row.xray_items_group ?? ''}</td>
                 <td>{row.Modality ?? ''}</td>
+                {showAccepted && (
+                  <td title={row.accepted === 'Y' ? `${formatAcceptDate(row.accept_date)} ${row.accept_time ?? ''}`.trim() : ''}>
+                    {row.accepted ?? ''}
+                  </td>
+                )}
                 <td>{row.confirm ?? ''}</td>
                 <td>{isFilmConfirmed ? 'Y' : (row.confirm_read_film ?? '')}</td>
                 <td>{formatDoctorField(row.Doctor, lang)}</td>

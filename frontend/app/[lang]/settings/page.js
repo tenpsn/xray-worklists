@@ -31,6 +31,7 @@ const DEFAULT_FORM = {
     autoGenerate: {
       intervalSec: 10, // รอบเวลาดึงข้อมูลมาสร้างไฟล์ คุมทั้ง 3 แบบ HIS (HOSxP/SoftCon/HL7)
       confirmLogic: 'both', // 'confirm_read_film' | 'confirm' | 'both' สร้างไฟล์ ใช้เฉพาะ HOSxP/SoftCon
+      requireAccept: false, // HOSxP เท่านั้น: true = ต้องกดรับตัว (accept_date มีค่า) ก่อนถึงจะสร้างไฟล์ .wl
     },
   },
 };
@@ -621,7 +622,8 @@ export default function SettingsPage() {
             />
           </label>
 
-          {(form.his.hisSystem === 'hosxp' || form.his.hisSystem === 'softcon') && (
+          {/* HOSxP ที่ติ๊กรับตัวผู้ป่วย สร้าง .wl ตามการรับตัวอย่างเดียว เลยซ่อนช่องเลือก confirm/confirm_read_film */}
+          {(form.his.hisSystem === 'softcon' || (form.his.hisSystem === 'hosxp' && form.mwl.autoGenerate.requireAccept !== true)) && (
             <div style={{ gridColumn: '1 / -1' }}>
               <div style={{ fontSize: '13px', color: '#444', marginBottom: '6px' }}>{dict.confirmLogicLabel}</div>
               <div style={{ display: 'flex', gap: '20px' }}>
@@ -644,6 +646,20 @@ export default function SettingsPage() {
                   {dict.confirmLogicReadFilmOption}
                 </label>
               </div>
+            </div>
+          )}
+
+          {form.his.hisSystem === 'hosxp' && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ flexDirection: 'row', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#444' }}>
+                <input
+                  type="checkbox"
+                  style={{ width: '18px', height: '18px' }}
+                  checked={form.mwl.autoGenerate.requireAccept === true}
+                  onChange={(e) => updateAutoGenerate('requireAccept', e.target.checked)}
+                />
+                {dict.requireAcceptLabel}
+              </label>
             </div>
           )}
         </div>

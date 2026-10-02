@@ -330,9 +330,9 @@ function buildInClause(state, column, values, negate = false) {
 // dbType (postgres/mysql/mssql) เลือก "ภาษา SQL" ที่ถูกต้องของแต่ละฐานข้อมูล
 // - hosxp   -> ต่อได้เฉพาะ mysql/postgres (HOSxP ไม่รองรับ MSSQL)
 // - softcon -> ต่อได้ทั้ง mysql/postgres/mssql
-function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs = [], xns_NN = [], xns_YN = [], xns_NY = [], dbType = 'postgres', hisSystem = 'softcon') {
+function buildXrayReportQuery(dateback, include, exclude, confirm, existingXNs = [], xns_NN = [], xns_YN = [], xns_NY = [], dbType = 'postgres', hisSystem = 'softcon', xns_NN_accepted = []) {
   if (hisSystem === 'hosxp') {
-    return buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType);
+    return buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType, xns_NN_accepted);
   }
   if (hisSystem === 'hl7') {
     return buildHl7Query(dateback, dbType, confirm);
@@ -613,7 +613,7 @@ function buildSoftconQuery(dateback, include, exclude, confirm, existingXNs, dbT
 }
 
 // HOSxP - schema แบบ xray_report/patient/xray_items/doctor/xray_head
-function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType) {
+function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, dbType, xns_NN_accepted = []) {
   const state = { params: [], paramIndex: 1 };
   const safeDateback = Number.isFinite(Number(dateback)) ? Number(dateback) : 0;
 
@@ -632,6 +632,9 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
       a.xn, b.hn, b.cid, b.pname, b.fname, b.lname, b.birthday, b.sex,
       c.xray_items_name AS xraylist, a.request_date AS "StudyDate",
       a.request_time AS "StudyTime", c.xray_items_group, a.confirm, a.confirm_read_film,
+      -- accept_date/accept_time = เวลาที่ห้อง X-ray กด "รับตัว" ใน HOSxP (NULL = ยังไม่รับตัว) ใช้กับ requireAccept
+      a.accept_date, a.accept_time,
+      CASE WHEN a.accept_date IS NOT NULL THEN 'Y' ELSE 'N' END AS accepted,
       d.name AS "Doctor", a.xray_items_code, '' AS "Modality",
       '' AS stuid, h.department_name
     FROM xray_report a
@@ -660,9 +663,10 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
     let filterSql = buildInClause(state, 'a.xn', existingXNs, true);
 
     // ถ้าหน้าบ้านมีสถานะ N,N -> จะดึงข้อมูลกลับมาก็ต่อเมื่อ DB เปลี่ยนตัวใดตัวหนึ่งเป็น Y แล้ว
+    // (รวมถึงตอนกดรับตัว accept_date มีค่า เพื่อให้หน้าเว็บสร้าง .wl ได้ทันทีเมื่อเปิด requireAccept)
     const nnClause = buildInClause(state, 'a.xn', xns_NN);
     if (nnClause) {
-      filterSql += ` OR (${nnClause} AND (COALESCE(a.confirm, 'N') = 'Y' OR COALESCE(a.confirm_read_film, 'N') = 'Y'))`;
+      filterSql += ` OR (${nnClause} AND (COALESCE(a.confirm, 'N') = 'Y' OR COALESCE(a.confirm_read_film, 'N') = 'Y' OR a.accept_date IS NOT NULL))`;
     }
 
     // ถ้าหน้าบ้านมีสถานะ Y,N -> จะดึงข้อมูลกลับมาก็ต่อเมื่อ DB เปลี่ยน confirm_read_film เป็น Y แล้ว
@@ -675,6 +679,12 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
     const nyClause = buildInClause(state, 'a.xn', xns_NY);
     if (nyClause) {
       filterSql += ` OR (${nyClause} AND COALESCE(a.confirm, 'N') = 'Y')`;
+    }
+
+    // ถ้าหน้าบ้านมีสถานะ N,N แต่รับตัวแล้ว -> ดึงกลับมาเมื่อ confirm/confirm_read_film เปลี่ยน หรือยกเลิกการรับตัว
+    const nnAcceptedClause = buildInClause(state, 'a.xn', xns_NN_accepted);
+    if (nnAcceptedClause) {
+      filterSql += ` OR (${nnAcceptedClause} AND (COALESCE(a.confirm, 'N') = 'Y' OR COALESCE(a.confirm_read_film, 'N') = 'Y' OR a.accept_date IS NULL))`;
     }
 
     sql += ` AND (${filterSql})`;
@@ -841,14 +851,21 @@ const WORKLIST_CONCURRENCY = 5;
 // เงื่อนไข สร้างไฟล์ .wl
 // HL7 บังคับดู confirm_read_film เสมอ
 // HOSxP/SoftCon เลือกได้ผ่าน comfirmLogic (confirm/confirm_read_film/both) ที่หน้า settings
-function shouldGenerateWorklist(record, hisSystem, confirmLogic) {
+function shouldGenerateWorklist(record, hisSystem, confirmLogic, requireAccept) {
   if (hisSystem === 'hl7') {
     return record.confirm_read_film === 'N';
   }
+  // HOSxP + requireAccept: ดูแค่รับตัวแล้วหรือยัง ไม่สน confirmLogic (หน้า settings ซ่อนช่องเลือกไว้)
+  if (requireAccept === true && hisSystem === 'hosxp') return record.accepted === 'Y';
   if (confirmLogic === 'confirm') return record.confirm === 'N';
   if (confirmLogic === 'confirm_read_film') return record.confirm_read_film === 'N';
   // 'both' (ค่าเริ่มต้น): สร้างไฟล์ก็ต่อเมื่อทั้งยืนยันผลตรวจและยืนยันอ่านฟิล์มยังเป็น N อยู่
   return record.confirm === 'N' && record.confirm_read_film === 'N';
+}
+
+// เคส HOSxP ที่ยังไม่รับตัว ขณะเปิด requireAccept - SoftCon ไม่มีคอลัมน์ accept เลยไม่บังคับ
+function isAwaitingAccept(record, hisSystem, requireAccept) {
+  return requireAccept === true && hisSystem === 'hosxp' && record.accepted !== 'Y';
 }
 
 async function processWorklistFiles(records, displayLang) {
@@ -860,6 +877,7 @@ async function processWorklistFiles(records, displayLang) {
 
   const hisSystem = currentSettings.his.hisSystem;
   const confirmLogic = currentSettings.mwl.autoGenerate.confirmLogic || 'both';
+  const requireAccept = currentSettings.mwl.autoGenerate.requireAccept === true;
 
   try {
     // 1. กรองเอาเฉพาะข้อมูลที่ไม่ซ้ำกัน ใช้ xn เป็นตัวตรวจสอบ
@@ -897,7 +915,11 @@ async function processWorklistFiles(records, displayLang) {
             // (กดยืนยันอ่านฟิล์มจากหน้าเว็บ หรือเครื่อง X-ray ส่ง MPPS แจ้ง COMPLETED/DISCONTINUED มา) โดยไม่ต้องรอ HIS อัปเดต
             dicomService.deleteWorklistFile(record.xn);
 
-          } else if (shouldGenerateWorklist(record, hisSystem, confirmLogic)) {
+          } else if (isAwaitingAccept(record, hisSystem, requireAccept)) {
+            // ยังไม่รับตัว (หรือ HOSxP ยกเลิกการรับตัว) - ลบไฟล์ที่อาจสร้างไว้ก่อนเปิด requireAccept ไม่ให้ค้างบนเครื่อง Modality
+            dicomService.deleteWorklistFile(record.xn);
+
+          } else if (shouldGenerateWorklist(record, hisSystem, confirmLogic, requireAccept)) {
             await dicomService.generateWorklistFile(record);
           }
 
@@ -982,14 +1004,15 @@ app.post('/api/xray-report', async (req, res) => {
 
   isProcessingXrayReport = true;
   try {
-    const { dateback = 1, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY } = req.body;
+    const { dateback = 1, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, xns_NN_accepted } = req.body;
     const confirmFlag = confirm === true || confirm === 'true' || confirm === '1';
 
     const { sql, params } = buildXrayReportQuery(
       dateback, include, exclude, confirmFlag,
       existingXNs, xns_NN, xns_YN, xns_NY,
       currentSettings.his.dbType,
-      currentSettings.his.hisSystem
+      currentSettings.his.hisSystem,
+      xns_NN_accepted
     );
 
     const result = await db.query(sql, params);
