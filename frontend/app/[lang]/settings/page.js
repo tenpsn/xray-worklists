@@ -622,10 +622,11 @@ export default function SettingsPage() {
             />
           </label>
 
-          {/* HOSxP ที่ติ๊กรับตัวผู้ป่วย สร้าง .wl ตามการรับตัวอย่างเดียว เลยซ่อนช่องเลือก confirm/confirm_read_film */}
-          {(form.his.hisSystem === 'softcon' || (form.his.hisSystem === 'hosxp' && form.mwl.autoGenerate.requireAccept !== true)) && (
+          {/* หัวข้อวิธีสร้างไฟล์ wl แสดงตลอด ถ้า HOSxP ติ๊กรับตัวผู้ป่วยจะซ่อนแค่ช่องเลือก */}
+          {(form.his.hisSystem === 'softcon' || form.his.hisSystem === 'hosxp') && (
             <div style={{ gridColumn: '1 / -1' }}>
               <div style={{ fontSize: '13px', color: '#444', marginBottom: '6px' }}>{dict.confirmLogicLabel}</div>
+              {!(form.his.hisSystem === 'hosxp' && form.mwl.autoGenerate.requireAccept === true) && (
               <div style={{ display: 'flex', gap: '20px' }}>
                 <label style={{ flexDirection: 'row', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#444' }}>
                   <input
@@ -646,20 +647,21 @@ export default function SettingsPage() {
                   {dict.confirmLogicReadFilmOption}
                 </label>
               </div>
-            </div>
-          )}
+              )}
 
-          {form.his.hisSystem === 'hosxp' && (
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ flexDirection: 'row', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#444' }}>
-                <input
-                  type="checkbox"
-                  style={{ width: '18px', height: '18px' }}
-                  checked={form.mwl.autoGenerate.requireAccept === true}
-                  onChange={(e) => updateAutoGenerate('requireAccept', e.target.checked)}
-                />
-                {dict.requireAcceptLabel}
-              </label>
+              {form.his.hisSystem === 'hosxp' && (
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ flexDirection: 'row', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#444' }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: '18px', height: '18px' }}
+                      checked={form.mwl.autoGenerate.requireAccept === true}
+                      onChange={(e) => updateAutoGenerate('requireAccept', e.target.checked)}
+                    />
+                    {dict.requireAcceptLabel}
+                  </label>
+                </div>
+              )}
             </div>
           )}
         </div>

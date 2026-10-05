@@ -12,3 +12,8 @@ backend/orthanc-mover/mover-plan/
 frontend/.next/
 
 orthanc-data/
+backend/image-queue/queue/
+backend/image-queue/tmp/
+backend/image-queue/failed/
+backend/image-queue/imagehub-token.json
+backend/image-queue/imagehub-token.json.tmp

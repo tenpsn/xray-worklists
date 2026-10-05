@@ -55,6 +55,37 @@ const DEFAULT_SETTINGS = {
       requireAccept: process.env.AUTO_GENERATE_REQUIRE_ACCEPT === 'true' || false,
     },
   },
+  // รับภาพจากเครื่องเอกซเรย์เก็บลงคิว ปิดไว้เป็นค่าเริ่มต้น
+  imageStore: {
+    enabled: process.env.IMAGE_STORE_ENABLED === 'true',
+    aet: process.env.IMAGE_STORE_AET || 'XRAYWL_STORE', // AE Title ที่เครื่องเอกซเรย์ต้องเรียกเข้ามา ว่างคือไม่ตรวจ
+    port: process.env.IMAGE_STORE_PORT || '', // พอร์ตรับภาพ ว่างคือไม่เปิด
+    storageDir: process.env.IMAGE_STORE_DIR || '',
+  },
+  // ส่งภาพจากคิวต่อเข้า PACS ปิดไว้เป็นค่าเริ่มต้น ภาพที่เข้ามาตอนปิดจะไม่ถูกส่ง
+  // ชื่อผู้ส่งใช้ AE Title ตัวเดียวกับฝั่งรับภาพ
+  pacs: {
+    enabled: false,
+    aet: '', // AE Title ของ PACS ปลายทาง
+    host: '',
+    port: '',
+  },
+  // ส่งภาพจากคิวขึ้น MOPH ImageHub ปิดไว้เป็นค่าเริ่มต้น หา CID จาก HIS ด้านบน
+  // รหัสลับถูกซ่อนก่อนส่งไปหน้าเว็บเสมอ ส่วน token จากการล็อกอินเก็บแยกไฟล์
+  imagehub: {
+    enabled: false,
+    imagehubUrl: 'https://imh.moph.go.th',
+    hoscode: '', // รหัสสถานพยาบาล
+    modalities: [], // ว่างคือส่งทุก Modality ถ้าระบุจะส่งเฉพาะที่เลือก ที่เหลือไม่ต้องส่ง
+    mophUrl: 'https://moph.id.th',
+    healthUrl: 'https://moph.id.th/api/v1/token',
+    providerUrl: 'https://provider.id.th/api/v1/services/token',
+    clientId: '', // Health ID
+    secretKey: '',
+    clientId2: '', // Provider ID
+    secretKey2: '',
+    redirectUri: '', // ว่างคือใช้ที่อยู่ของหน้าเว็บ ต้องตรงกับที่ลงทะเบียนไว้กับ MOPH
+  },
 };
 
 // รองรับไฟล์ settings.json เก่าที่ยังเก็บ modalityAet/modalityIp เดี่ยว (ก่อนรองรับหลายแถว)
@@ -104,6 +135,9 @@ function loadSettings() {
       return {
         his: { ...DEFAULT_SETTINGS.his, ...(saved.his || {}) },
         mwl: { ...DEFAULT_SETTINGS.mwl, ...migrateLegacyModalityPorts(migrateLegacyModality(saved.mwl || {})) },
+        imageStore: { ...DEFAULT_SETTINGS.imageStore, ...(saved.imageStore || {}) },
+        pacs: { ...DEFAULT_SETTINGS.pacs, ...(saved.pacs || {}) },
+        imagehub: { ...DEFAULT_SETTINGS.imagehub, ...(saved.imagehub || {}) },
       };
     }
   } catch (err) {
@@ -117,6 +151,9 @@ function saveSettings(newSettings) {
   const merged = {
     his: { ...current.his, ...(newSettings.his || {}) },
     mwl: { ...current.mwl, ...(newSettings.mwl || {}) },
+    imageStore: { ...current.imageStore, ...(newSettings.imageStore || {}) },
+    pacs: { ...current.pacs, ...(newSettings.pacs || {}) },
+    imagehub: { ...current.imagehub, ...(newSettings.imagehub || {}) },
   };
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2), 'utf8');
   console.log('[Settings] ---> บันทึกการตั้งค่าใหม่เรียบร้อยแล้ว');

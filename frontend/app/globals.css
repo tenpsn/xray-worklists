@@ -162,11 +162,21 @@ tbody tr:hover {
   border-radius: 4px;
   background: white;
   transition: all 0.2s ease-in-out;
+  /* ให้ลิงก์กับปุ่มที่ใช้ class นี้สูงเท่ากันเสมอ */
+  display: inline-block;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .settings-link:hover {
   background: #2563eb;
   color: white;
+}
+
+/* ปุ่มในแถบหัวหน้าให้ขนาดและฟอนต์เท่ากับลิงก์ */
+button.settings-link {
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .subtitle {
@@ -349,12 +359,100 @@ tbody tr:hover {
   gap: 12px;
 }
 
+/* การ์ดที่มีช่องน้อย ไม่ยืดช่องจนเต็มความกว้าง
+   ต้องอยู่ก่อนส่วนจอเล็กด้านล่าง */
+.settings-grid-compact {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 240px));
+}
+
 .settings-grid label {
   display: flex;
   flex-direction: column;
   font-size: 13px;
   color: #444;
   gap: 4px;
+}
+
+/* ช่องกรอกเรียงคอลัมน์เดียว ใช้ในการ์ด ImageHub */
+.stacked-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 560px;
+  margin-top: 14px;
+}
+
+.stacked-fields label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  color: #444;
+  gap: 4px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* กรอบสวิตช์เปิดปิดพร้อมคำอธิบาย */
+.toggle-box {
+  max-width: 560px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  cursor: pointer;
+}
+
+/* checkbox แต่งเป็นสวิตช์เลื่อน */
+.toggle-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: #d1d5db;
+  cursor: pointer;
+  transition: background 0.2s ease-in-out;
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease-in-out;
+}
+
+.toggle-switch:checked {
+  background: #2563eb;
+}
+
+.toggle-switch:checked::after {
+  transform: translateX(18px);
+}
+
+.toggle-switch:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
 }
 
 .settings-grid select {

@@ -11,6 +11,11 @@ const settingsService = require('./settingsService');
 const db = require('./db');
 const Mppsservice = require('./Mppsservice');
 const worklistScpService = require('./worklistScpService');
+const imageStoreService = require('./image-queue/imageStoreService');
+const pacsForwardService = require('./image-queue/pacsForwardService');
+const imagehubService = require('./image-queue/imagehubService');
+const imageCleanup = require('./image-queue/imageCleanup');
+const { createImageQueueRoutes } = require('./image-queue/routes');
 const hl7Service = require('./hl7Service');
 const orthancCleanerRoutes = require('./orthanc-cleaner/routes');
 const orthancMoverRoutes = require('./orthanc-mover/routes');
@@ -168,8 +173,39 @@ function syncPublishedPorts(desiredPorts, envVarName) {
   }
 }
 
+// รับภาพจากเครื่องเอกซเรย์เข้าคิวและส่งต่อเข้า PACS
+// แยกออกมาให้หน้าคิวส่งภาพเรียกใช้เองได้ คืนรายการข้อความเตือน
+async function applyImageSettings(settings) {
+  const warnings = [];
+  const imageStore = settings.imageStore || {};
+  const desiredStorePorts = imageStore.enabled && imageStore.port ? [String(imageStore.port)] : [];
+  const storePortsChanged = syncPublishedPorts(desiredStorePorts, 'BACKEND_PUBLISHED_STORE_PORTS');
+  if (storePortsChanged) {
+    console.warn(
+      `[Server] ---> sync พอร์ตรับภาพใน docker-compose.yml ให้ตรงกับที่ตั้งไว้ตอนนี้แล้ว (${desiredStorePorts.join(', ') || 'ไม่มี'}) ` +
+      'แต่ยังไม่มีผลจริงจนกว่าจะรัน "docker compose up -d" เอง (restart container เฉยๆ ไม่พอ เพราะ port ผูกไว้ตอน create)'
+    );
+    warnings.push(`พอร์ตรับภาพเปลี่ยนเป็น ${desiredStorePorts.join(', ') || 'ไม่มี'} - ต้องรัน "docker compose up -d" ก่อนเครื่อง X-ray จากภายนอกจะต่อเข้ามาได้`);
+  }
+  try {
+    const storeError = await imageStoreService.applyImageStoreSettings(imageStore);
+    if (storeError) {
+      warnings.push(`เปิดการรับภาพ (C-STORE) ไม่สำเร็จ - ${storeError}`);
+    }
+  } catch (err) {
+    console.error('[Server] ---> เริ่มรับภาพ (C-STORE) ไม่สำเร็จ:', err.message);
+    warnings.push(`เริ่มรับภาพ (C-STORE) ไม่สำเร็จ - ${err.message}`);
+  }
+
+  // ใช้ AE Title ฝั่งรับภาพเป็นชื่อผู้ส่งตอนส่งเข้า PACS
+  pacsForwardService.applyPacsSettings(settings.pacs, imageStore.aet);
+  // หา CID จาก HIS ตัวเดียวกับหน้าตั้งค่าหลัก
+  imagehubService.applyImagehubSettings(settings.imagehub, settings.his);
+  return warnings;
+}
+
 async function applySettings(settings, options = {}) {
-  const { exitOnMppsFailure = false, restartAutoGenLoop = true } = options;
+  const { exitOnMppsFailure = false, restartAutoGenLoop = true, applyImage = true } = options;
   const warnings = [];
   let dbError = null;
   let dbSkipped = false;
@@ -251,6 +287,15 @@ async function applySettings(settings, options = {}) {
     warnings.push(`เริ่ม Worklist SCP ไม่สำเร็จ - ${err.message}`);
   }
 
+  // 2c ส่วนรับภาพย้ายไปตั้งที่หน้าคิวส่งภาพแล้ว จึงไม่ต้องเริ่มตัวรับภาพใหม่
+  // กันภาพที่กำลังส่งเข้ามาถูกตัดกลางทาง
+  if (applyImage) {
+    warnings.push(...(await applyImageSettings(settings)));
+  } else {
+    // HIS อาจเปลี่ยน ImageHub ต้องใช้ HIS ตัวนี้หา CID
+    imagehubService.applyImagehubSettings(settings.imagehub, settings.his);
+  }
+
   // 3. เชื่อมต่อฐานข้อมูล HIS
   const hisConfig = settings.his || {};
   if (hisConfig.host && hisConfig.database) {
@@ -301,12 +346,26 @@ process.on('unhandledRejection', (reason) => {
 process.on('SIGINT', () => {
   Mppsservice.stopMppsServer();
   worklistScpService.stopAllWorklistScpServers();
+  imageStoreService.stopImageStoreServer();
+  pacsForwardService.stop();
+  imagehubService.stop();
+  imageCleanup.stop();
   process.exit(0);
 });
 process.on('SIGTERM', () => {
   Mppsservice.stopMppsServer();
   worklistScpService.stopAllWorklistScpServers();
+  imageStoreService.stopImageStoreServer();
+  pacsForwardService.stop();
+  imagehubService.stop();
+  imageCleanup.stop();
   process.exit(0);
+});
+
+// ภาพใหม่เข้าคิวแล้วส่งต่อทันที ไม่ต้องรอรอบถัดไป
+imageStoreService.setOnImageQueued(() => {
+  pacsForwardService.kick();
+  imagehubService.kick();
 });
 
 // สร้างเงื่อนไข LIKE / NOT LIKE
@@ -707,6 +766,19 @@ app.get('/health', async (req, res) => {
 app.use('/api/orthanc', orthancCleanerRoutes);
 app.use('/api/orthanc-mover', orthancMoverRoutes);
 
+// เส้นทาง API ของระบบคิวส่งภาพ
+app.use('/api/image-queue', createImageQueueRoutes({
+  getSettings: () => currentSettings,
+  saveSettings: (partial) => {
+    currentSettings = settingsService.saveSettings(partial);
+    return currentSettings;
+  },
+  applyImageSettings,
+  maskSecrets,
+  reconcileSecrets,
+  toDisplayPath,
+}));
+
 app.get('/api/settings', (req, res) => {
   res.json({
     success: true,
@@ -802,6 +874,7 @@ app.post('/api/settings', async (req, res) => {
     const { dbError, dbSkipped, warnings } = await applySettings(currentSettings, {
       exitOnMppsFailure: false,
       restartAutoGenLoop: true,
+      applyImage: false, // ตั้งค่ารับส่งภาพแยกไปอยู่ที่หน้าคิวส่งภาพ
     });
 
     const warningText = warnings.length > 0 ? warnings.join(' | ') : '';
@@ -1278,4 +1351,6 @@ dbReadyPromise.finally(() => {
 
   startAutoWorklistLoop();
   orthancMoverService.resumeIfNeeded();
+  // เริ่มหลังตั้งค่าเสร็จ ต้องรู้ก่อนว่าปลายทางไหนเปิดอยู่ ไม่งั้นจะเข้าใจผิดว่าภาพส่งครบแล้ว
+  imageCleanup.start();
 });

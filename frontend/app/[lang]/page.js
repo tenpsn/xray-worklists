@@ -28,6 +28,11 @@ export default function HomePage() {
           <h2>{dict.moverCardTitle}</h2>
           <p>{dict.moverCardDesc}</p>
         </Link>
+        <Link className="menu-card" href={`/${lang}/image-queue`}>
+          <div className="menu-icon">📥</div>
+          <h2>{dict.imageQueueCardTitle}</h2>
+          <p>{dict.imageQueueCardDesc}</p>
+        </Link>
       </div>
     </div>
   );

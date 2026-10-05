@@ -13,6 +13,8 @@ services:
       - BACKEND_PUBLISHED_MPPS_PORTS=7001
       # พอร์ต Worklist SCP แยกต่อ modality (worklistScpService.js) - ต้องตรงกับ "ports:" ด้านล่าง และ mwl.modalityPorts ใน backend/settings.json
       - BACKEND_PUBLISHED_WORKLIST_PORTS=4243,4244
+      # พอร์ตรับภาพจากเครื่องเอกซเรย์ backend ตั้งให้เองตามหน้าตั้งค่า ว่างคือปิด
+      - BACKEND_PUBLISHED_STORE_PORTS=
     ports:
       - "4000:4000"
       - "4001:4001"
