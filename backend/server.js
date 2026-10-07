@@ -1010,41 +1010,6 @@ async function processWorklistFiles(records, displayLang) {
   }
 }
 
-// จำนวน XN ที่ส่งไปเช็คใน DB ต่อครั้ง
-const ORPHAN_CHECK_BATCH_SIZE = 500;
-// ถ้าเช็คเกินจำนวนนี้แล้วไม่เจอใน DB เลยสักตัว อาจต่อผิดฐานข้อมูล จะไม่ลบไฟล์
-const ORPHAN_CHECK_MIN_FOR_GUARD = 5;
-
-// ลบไฟล์ worklist ของออเดอร์ที่ถูกลบใน HOSxP ไปแล้ว
-// เอาเลข XN จากชื่อไฟล์ไปเช็คใน DB ตรงๆ อ่านอย่างเดียว ไม่แก้ข้อมูลใน DB
-async function removeOrphanWorklists() {
-  if (currentSettings.his.hisSystem !== 'hosxp') return;
-
-  // XN ของ HOSxP เป็นตัวเลขเสมอ ชื่อไฟล์ที่ไม่ใช่ตัวเลขจะข้ามไป
-  const fileXns = dicomService.listWorklistAccessionNumbers().filter((xn) => /^\d+$/.test(xn));
-  if (fileXns.length === 0) return;
-
-  const existing = new Set();
-  for (let i = 0; i < fileXns.length; i += ORPHAN_CHECK_BATCH_SIZE) {
-    const state = { params: [], paramIndex: 1 };
-    const inClause = buildInClause(state, 'xn', fileXns.slice(i, i + ORPHAN_CHECK_BATCH_SIZE));
-    const result = await db.query(`SELECT xn FROM xray_report WHERE ${inClause}`, state.params);
-    result.rows.forEach((row) => existing.add(String(row.xn)));
-  }
-
-  if (existing.size === 0 && fileXns.length > ORPHAN_CHECK_MIN_FOR_GUARD) {
-    console.warn(`[Worklist Auto] ---> ไม่พบ XN ของไฟล์ .wl ใน xray_report เลยสักรายการ (${fileXns.length} ไฟล์) อาจต่อผิดฐานข้อมูล ข้ามการลบรอบนี้`);
-    return;
-  }
-
-  fileXns
-    .filter((xn) => !existing.has(xn))
-    .forEach((xn) => {
-      console.log(`[Worklist Auto] ---> ลบไฟล์ worklist ${xn} เพราะออเดอร์ถูกลบใน HIS แล้ว`);
-      dicomService.deleteWorklistFile(xn);
-    });
-}
-
 // สร้างไฟล์ .wl อัตโนมัติ
 let autoGenIntervalHandle = null;
 let isAutoGenRunning = false;
@@ -1079,8 +1044,6 @@ async function runAutoWorklistCycle() {
     if (records.length > 0) {
       await processWorklistFiles(records, currentSettings.mwl.lang);
     }
-    // ทำทุกรอบ ถ้าต่อ DB ไม่ได้จะไม่มาถึงบรรทัดนี้
-    await removeOrphanWorklists();
   } catch (err) {
     console.error('[Worklist Auto] ---> เกิดข้อผิดพลาดขณะสร้างไฟล์ worklist อัตโนมัติ:', err.message);
   } finally {

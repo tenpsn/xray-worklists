@@ -596,25 +596,6 @@ function deleteWorklistFile(xn) {
   }
 }
 
-// ดึงเลข XN จากชื่อไฟล์ worklist ทั้งหมดที่มีอยู่ ทั้งโฟลเดอร์หลักและโฟลเดอร์ภาษา
-function listWorklistAccessionNumbers() {
-  const names = new Set();
-  const readNames = (dir) => {
-    try {
-      fs.readdirSync(dir)
-        .filter((f) => f.endsWith('.wl'))
-        .forEach((f) => names.add(f.split('.')[0]));
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        console.warn(`[DICOM Service] ---> อ่านโฟลเดอร์ worklist ไม่สำเร็จ: ${dir}`, err.message);
-      }
-    }
-  };
-  readNames(WORKLIST_DIR);
-  readNames(getLangVariantDir());
-  return [...names];
-}
-
 // เตรียมโฟลเดอร์ default ไว้ตั้งแต่ตอนโหลดโมดูล เผื่อยังไม่มีการเรียก setWorklistDir
 ensureDirExists(WORKLIST_DIR);
 ensureDirExists(getLangVariantDir());
@@ -625,7 +606,6 @@ ensureWorklistCleanupForToday();
 module.exports = {
   generateWorklistFile,
   deleteWorklistFile,
-  listWorklistAccessionNumbers,
   cleanupStaleWorklists,
   setWorklistDir,
   getWorklistDir,
