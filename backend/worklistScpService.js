@@ -142,6 +142,35 @@ function extractModality(dataset) {
   }
 }
 
+// ดึงวันที่นัดตรวจออกมา ใช้ได้ทั้งกับไฟล์ worklist และคำขอที่เครื่องส่งมา
+function extractStartDate(dataset) {
+  try {
+    const seq = dataset.getElement('ScheduledProcedureStepSequence');
+    const item = Array.isArray(seq) ? seq[0] : seq;
+    return item && item.ScheduledProcedureStepStartDate ? String(item.ScheduledProcedureStepStartDate).trim() : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+// เช็คว่าวันที่ของไฟล์อยู่ในวันหรือช่วงวันที่เครื่องขอมาหรือไม่
+// ถ้าเครื่องไม่ได้ขอวันที่ หรือไฟล์ไม่มีวันที่ ให้ส่งไปตามปกติ
+function matchesDateFilter(fileDate, filter) {
+  if (!filter) return true;
+  const date = fileDate.replace(/[^0-9]/g, '').substring(0, 8);
+  if (date.length !== 8) return true;
+
+  if (!filter.includes('-')) {
+    return date === filter.replace(/[^0-9]/g, '').substring(0, 8);
+  }
+  const [rawFrom, rawTo] = filter.split('-');
+  const from = (rawFrom || '').replace(/[^0-9]/g, '').substring(0, 8);
+  const to = (rawTo || '').replace(/[^0-9]/g, '').substring(0, 8);
+  if (from && date < from) return false;
+  if (to && date > to) return false;
+  return true;
+}
+
 function loadDataset(filePath) {
   return new Promise((resolve) => {
     Dataset.fromFile(filePath, (error, dataset) => {
@@ -154,11 +183,12 @@ function loadDataset(filePath) {
   });
 }
 
-// เฉพาะเคสที่ Modality ตรงกับพอร์ตนี้เท่านั้น - ไม่กรองฟิลด์อื่นเพิ่ม (เหมือน Orthanc ตอน DicomAlwaysAllowFindWorklist=true)
+// ส่งเฉพาะรายการที่ประเภทเครื่องตรงกับพอร์ตนี้ และวันที่ตรงกับที่เครื่องขอมา
+// ถ้าไม่กรองวันที่ เครื่องที่เลือกวันนี้จะเห็นออเดอร์เมื่อวานที่ยังค้างอยู่ด้วย
 // lang ว่าง = ใช้โฟลเดอร์หลัก (พฤติกรรมเดิม ก่อนรองรับแยกภาษา) / lang 'th'/'en' = ใช้ไฟล์คู่ภาษา+encoding จาก getLangVariantDir()
 // คืน { filePath, dataset } เก็บ filePath ไว้ด้วย เพราะตอนตอบกลับจริงต้องอ่าน byte ดิบจากไฟล์เดิมอีกรอบ (buildRawDatasetResponse)
 // ไม่ใช้ dataset ที่ parse ผ่าน dcmjs ตัวนี้ตรงๆ (ใช้แค่หา modality กรองไฟล์ - ปลอดภัยเพราะเป็น field ASCII)
-async function findMatchingDatasets(modalityCode, lang, charset) {
+async function findMatchingDatasets(modalityCode, lang, charset, dateFilter) {
   const dir = lang ? dicomService.getLangVariantDir() : dicomService.getWorklistDir();
   const suffix = lang ? `.${lang}.${charset === 'TIS620' ? 'tis620' : 'utf8'}.wl` : '.wl';
 
@@ -175,7 +205,9 @@ async function findMatchingDatasets(modalityCode, lang, charset) {
     const dataset = await loadDataset(filePath);
     return { filePath, dataset };
   }));
-  return entries.filter((e) => e.dataset && extractModality(e.dataset) === modalityCode);
+  return entries.filter((e) => e.dataset
+    && extractModality(e.dataset) === modalityCode
+    && matchesDateFilter(extractStartDate(e.dataset), dateFilter));
 }
 
 // สร้าง Scp class ที่ผูกกับ modality+ภาษา+encoding เดียว (ตามพอร์ตที่เครื่องนี้เปิดฟัง)
@@ -230,7 +262,10 @@ function createWorklistScpClass(modalityCode, lang, charset) {
     }
 
     cFindRequest(request, callback) {
-      findMatchingDatasets(modalityCode, lang, charset)
+      const requestDataset = request.getDataset();
+      const dateFilter = requestDataset ? extractStartDate(requestDataset) : '';
+
+      findMatchingDatasets(modalityCode, lang, charset, dateFilter)
         .then((entries) => {
           const responses = entries.map(({ filePath }) => {
             const response = CFindResponse.fromRequest(request);
