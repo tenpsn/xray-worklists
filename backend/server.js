@@ -190,7 +190,8 @@ async function applySettings(settings, options = {}) {
       settings.mwl.aet,
       settings.mwl.port,
       settings.mwl.modalityAlwaysAllow,
-      settings.mwl.modalities
+      settings.mwl.modalities,
+      settings.mwl.dicomCharset
     );
   } catch (err) {
     console.error('[Settings] ---> sync โฟลเดอร์ worklists ไปยัง Orthanc ไม่สำเร็จ:', err.message);

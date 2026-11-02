@@ -60,7 +60,7 @@ function toOrthancPath(absoluteWorklistPath) {
 // prefix ของ key ใน DicomModalities แต่ละแถว (XRAY1, XRAY2, ...) - ลำดับตามที่กรอกในหน้า Settings
 const MODALITY_KEY_PREFIX = 'XRAY';
 
-async function syncOrthancWorklistPath(absoluteWorklistPath, aet, port, modalityAlwaysAllow, modalities) {
+async function syncOrthancWorklistPath(absoluteWorklistPath, aet, port, modalityAlwaysAllow, modalities, dicomCharset) {
   const orthancPath = toOrthancPath(absoluteWorklistPath);
   if (!orthancPath) {
     console.warn('[Orthanc] ---> แปลง path ให้ Orthanc ไม่สำเร็จ');
@@ -87,6 +87,15 @@ async function syncOrthancWorklistPath(absoluteWorklistPath, aet, port, modality
     config.DicomAet = desiredAet;
     changed = true;
     console.log(`[Orthanc] ---> อัปเดต DicomAet เป็น: ${desiredAet}`);
+  }
+
+  // Orthanc แปลงคำตอบ worklist เป็น DefaultEncoding ก่อนส่งเสมอ ต้องตั้งให้ตรงกับที่เลือกในหน้าเว็บ
+  // Thai คือ ISO_IR 166 ส่วน Utf8 คือ ISO_IR 192
+  const desiredEncoding = dicomCharset === 'TIS620' ? 'Thai' : 'Utf8';
+  if (config.DefaultEncoding !== desiredEncoding) {
+    config.DefaultEncoding = desiredEncoding;
+    changed = true;
+    console.log(`[Orthanc] ---> อัปเดต DefaultEncoding เป็น: ${desiredEncoding}`);
   }
 
   const desiredAlwaysAllow = modalityAlwaysAllow !== false; // ค่าเริ่มต้น true ถ้าไม่ได้ระบุ
