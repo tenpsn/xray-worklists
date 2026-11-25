@@ -16,6 +16,12 @@ const DEFAULT_SETTINGS = {
     username: process.env.PGUSER || '',
     password: process.env.PGPASSWORD || '',
     encoding: process.env.DB_ENCODING || '',
+    // ใช้เฉพาะตอนเลือกระบบ DoctorEase
+    apiBaseUrl: process.env.DOCTOREASE_BASE_URL || '',
+    apiToken: '',
+    tokenServerIp: '',
+    tokenExpiresAt: '',
+    branchCode: '',
   },
   mwl: {
     lang: process.env.MWL_LANG === 'th' ? 'th' : 'en',

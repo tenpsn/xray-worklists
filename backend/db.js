@@ -147,6 +147,10 @@ function getType() {
 
 // แปลง error เป็น code กลาง (ไม่ผูกภาษา) ให้ฝั่ง frontend ไป map เป็นข้อความ EN/TH เอง
 function friendlyErrorCode(err) {
+  // error จาก DoctorEase API มีรหัสกลางมาให้แล้ว
+  if (err.errorCode) {
+    return { errorCode: err.errorCode, errorParams: { message: err.message || '' } };
+  }
   const code = err.code;
 
   switch (code) {

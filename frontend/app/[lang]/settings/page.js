@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getDictionary, formatDbError, formatSettingsMessage } from '../../lib/i18n';
+import { getTokenExpiryWarning } from '../../lib/tokenExpiry';
 
 const DEFAULT_FORM = {
   his: {
@@ -14,6 +15,12 @@ const DEFAULT_FORM = {
     username: '',
     password: '',
     encoding: 'UTF8', // 'UTF8' | 'TIS620' | 'WIN874'
+    // ใช้เฉพาะระบบ DoctorEase
+    apiBaseUrl: '',
+    apiToken: '',
+    tokenServerIp: '',
+    tokenExpiresAt: '',
+    branchCode: '',
   },
   mwl: {
     lang: '', // ภาษาเริ่มต้นสำหรับออเดอร์ที่รับผ่าน hl7
@@ -50,6 +57,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [worklistDirActive, setWorklistDirActive] = useState('');
   const [detecting, setDetecting] = useState(false);
+
+  // ข้อมูลที่ใช้ขอ token จาก DoctorEase ไม่บันทึกลงการตั้งค่า
+  const [registerForm, setRegisterForm] = useState({ email: '', password: '', serverIp: '', expireDays: '365' });
+  const [registering, setRegistering] = useState(false);
+  const isDoctorease = form.his.hisSystem === 'doctorease';
+  const tokenWarning = getTokenExpiryWarning(fullDict, form.his);
 
   // รายชื่อ group/category จริงจาก HIS ที่ต่ออยู่ + modality ที่ระบบใช้อยู่ตอนนี้
   const [modalityGroups, setModalityGroups] = useState([]);
@@ -302,9 +315,41 @@ export default function SettingsPage() {
     }
   }
 
+  function updateRegisterForm(field, value) {
+    setRegisterForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleRegisterToken() {
+    setRegistering(true);
+    setStatus(dict.deRegisteringStatus);
+    setStatusType('info');
+    try {
+      const res = await fetch(`/api/settings/doctorease/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiBaseUrl: form.his.apiBaseUrl, ...registerForm }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setForm((prev) => ({ ...prev, his: { ...prev.his, ...json.settings.his } }));
+        setRegisterForm((prev) => ({ ...prev, password: '' }));
+        setStatus(dict.deRegisterSuccess + (json.expiresAt || ''));
+        setStatusType('success');
+      } else {
+        setStatus(dict.deRegisterFailedPrefix + formatDbError(fullDict, json.errorCode, json.errorParams));
+        setStatusType('error');
+      }
+    } catch (err) {
+      setStatus(dict.connectErrorPrefix + err.message);
+      setStatusType('error');
+    } finally {
+      setRegistering(false);
+    }
+  }
+
   async function handleSave() {
 
-    if (!form.his.hisSystem || !form.his.dbType) {
+    if (!form.his.hisSystem || (!isDoctorease && !form.his.dbType)) {
       setStatus(dict.selectHisAndDbError);
       setStatusType('error');
       return;
@@ -398,9 +443,105 @@ export default function SettingsPage() {
               <option value="hosxp">HOSxP</option>
               <option value="softcon">SoftCon</option>
               <option value="hl7">HL7</option>
+              <option value="doctorease">DoctorEase API</option>
             </select>
           </label>
 
+          {isDoctorease && (
+            <>
+              <label>
+                {dict.deBaseUrlLabel}
+                <input
+                  type="text"
+                  placeholder="https://clinic.doctorease.co"
+                  value={form.his.apiBaseUrl}
+                  onChange={(e) => updateHis('apiBaseUrl', e.target.value)}
+                />
+              </label>
+
+              <label>
+                {dict.deBranchCodeLabel}
+                <input
+                  type="text"
+                  placeholder={dict.deBranchCodePlaceholder}
+                  value={form.his.branchCode}
+                  onChange={(e) => updateHis('branchCode', e.target.value)}
+                />
+              </label>
+
+              <label>
+                {dict.deTokenStatusLabel}
+                <input
+                  type="text"
+                  readOnly
+                  value={form.his.apiToken
+                    ? `${dict.deTokenReady} ${form.his.tokenExpiresAt || ''} (IP ${form.his.tokenServerIp || '-'})`
+                    : dict.deTokenMissing}
+                />
+              </label>
+            </>
+          )}
+        </div>
+
+        {isDoctorease && (
+          <>
+            {tokenWarning && <div className="status status-error">{tokenWarning}</div>}
+            <h3>{dict.deRegisterTitle}</h3>
+            <div className="settings-grid">
+              <label>
+                {dict.deEmailLabel}
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={registerForm.email}
+                  onChange={(e) => updateRegisterForm('email', e.target.value)}
+                />
+              </label>
+
+              <label>
+                {dict.passwordLabel}
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={registerForm.password}
+                  onChange={(e) => updateRegisterForm('password', e.target.value)}
+                />
+              </label>
+
+              <label>
+                {dict.deServerIpLabel}
+                <input
+                  type="text"
+                  placeholder="203.0.113.10"
+                  value={registerForm.serverIp}
+                  onChange={(e) => updateRegisterForm('serverIp', e.target.value)}
+                />
+              </label>
+
+              <label>
+                {dict.deExpireDaysLabel}
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  value={registerForm.expireDays}
+                  onChange={(e) => updateRegisterForm('expireDays', e.target.value)}
+                />
+              </label>
+            </div>
+            <p className="field-note">{dict.deRegisterNote}</p>
+            <button
+              type="button"
+              style={{ marginTop: 12 }}
+              onClick={handleRegisterToken}
+              disabled={registering || !form.his.apiBaseUrl || !registerForm.email || !registerForm.password || !registerForm.serverIp}
+            >
+              {registering ? dict.deRegisteringStatus : dict.deRegisterButton}
+            </button>
+          </>
+        )}
+
+        <div className="settings-grid" style={{ display: isDoctorease ? 'none' : undefined }}>
           <label>
             {dict.databaseLabel}
             <select
@@ -522,7 +663,7 @@ export default function SettingsPage() {
             </select>
           </label>
 
-          <label>
+          <label style={{ display: isDoctorease ? 'none' : undefined }}>
             {dict.showNamePrefixLabel}
             <select
               value={form.mwl.showNamePrefix !== false ? 'show' : 'hide'}
@@ -667,7 +808,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-card">
+      {/* ซ่อนตอนใช้ DoctorEase เพราะ API ไม่มีข้อมูลประเภทเครื่อง */}
+      <div className="settings-card" style={{ display: isDoctorease ? 'none' : undefined }}>
         <h2>{dict.modalityTypesSectionTitle}</h2>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
           {form.mwl.modalityTypes.map((code) => (
@@ -710,7 +852,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-card">
+      {/* ซ่อนตอนใช้ DoctorEase เพราะ API ไม่มีข้อมูลประเภทเครื่อง */}
+      <div className="settings-card" style={{ display: isDoctorease ? 'none' : undefined }}>
         <h2>{dict.modalityPortsSectionTitle}</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {modalityPortRows.map((r, i) => (
@@ -785,7 +928,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-card">
+      {/* ซ่อนตอนใช้ DoctorEase เพราะ API ไม่มีข้อมูลประเภทเครื่อง */}
+      <div className="settings-card" style={{ display: isDoctorease ? 'none' : undefined }}>
         <h2>{dict.modalityGroupSectionTitle}</h2>
         {modalityGroupsNote && <p className="field-note" style={{ color: '#b91c1c' }}>{modalityGroupsNote}</p>}
         {modalityGroups.length > 0 && (

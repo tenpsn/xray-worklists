@@ -12,6 +12,7 @@ const db = require('./db');
 const Mppsservice = require('./Mppsservice');
 const worklistScpService = require('./worklistScpService');
 const hl7Service = require('./hl7Service');
+const doctoreaseService = require('./doctoreaseService');
 const orthancCleanerRoutes = require('./orthanc-cleaner/routes');
 const orthancMoverRoutes = require('./orthanc-mover/routes');
 const orthancMoverService = require('./orthanc-mover/orthancMoverService');
@@ -22,7 +23,7 @@ const PORT = process.env.PORT;
 const CORS_ORIGIN = process.env.CORS_ORIGIN;
 
 // ห้ามส่งค่าจริงกลับไปให้ frontend
-const SECRET_FIELD_REGEX = /(password|passwd|pwd|secret)/i;
+const SECRET_FIELD_REGEX = /(password|passwd|pwd|secret|apitoken)/i;
 
 // เพื่อป้องกันรหัสผ่านฐานข้อมูล
 function maskSecrets(value) {
@@ -254,7 +255,21 @@ async function applySettings(settings, options = {}) {
 
   // 3. เชื่อมต่อฐานข้อมูล HIS
   const hisConfig = settings.his || {};
-  if (hisConfig.host && hisConfig.database) {
+  if (hisConfig.hisSystem === 'doctorease') {
+    // DoctorEase ไม่มีฐานข้อมูลให้ต่อ ทดสอบด้วยการเรียก API แทน
+    doctoreaseService.resetTracking();
+    if (doctoreaseService.isConfigured(hisConfig)) {
+      try {
+        await doctoreaseService.fetchTodayRecords(hisConfig);
+      } catch (err) {
+        console.error('[Settings] ---> เรียก DoctorEase API ไม่สำเร็จ:', err.message);
+        dbError = err;
+      }
+    } else {
+      dbSkipped = true;
+      console.log('[Server] ---> ยังไม่ได้ตั้งค่า DoctorEase API รอการตั้งค่าจากหน้าเว็บ');
+    }
+  } else if (hisConfig.host && hisConfig.database) {
     try {
       await db.initPool(settings);
     } catch (err) {
@@ -697,6 +712,9 @@ function buildHosxpQuery(dateback, include, exclude, confirm, existingXNs, xns_N
 }
 
 app.get('/health', async (req, res) => {
+  if (currentSettings.his.hisSystem === 'doctorease') {
+    return res.json({ ok: true, db: 'doctorease-api' });
+  }
   try {
     await db.query('SELECT 1');
     res.json({ ok: true, db: 'connected' });
@@ -720,8 +738,8 @@ app.get('/api/settings', (req, res) => {
 // พร้อม modality ที่ระบบจะใช้จริงตอนนี้ ให้หน้า settings เอาไปโชว์ให้แก้ทับได้
 app.get('/api/settings/modality-groups', async (req, res) => {
   const hisConfig = currentSettings.his || {};
-  if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
-    return res.status(400).json({ success: false, errorCode: 'DB_NOT_CONFIGURED' });
+  if (!isHisConfigured(hisConfig)) {
+    return res.status(400).json({ success: false, errorCode: hisConfig.hisSystem === 'doctorease' ? 'DE_NOT_CONFIGURED' : 'DB_NOT_CONFIGURED' });
   }
   const catalogQuery = MODALITY_GROUP_CATALOG_QUERY[hisConfig.hisSystem];
   if (!catalogQuery) {
@@ -792,6 +810,31 @@ app.post('/api/settings/detect-his-system', async (req, res) => {
   }
 });
 
+// ขอ token จาก DoctorEase แล้วเก็บไว้ในการตั้งค่า ไม่เก็บรหัสผ่าน
+app.post('/api/settings/doctorease/register', async (req, res) => {
+  const { apiBaseUrl, email, password, serverIp, expireDays } = req.body || {};
+  if (!apiBaseUrl || !email || !password || !serverIp) {
+    return res.status(400).json({ success: false, errorCode: 'DE_REGISTER_FIELDS_REQUIRED' });
+  }
+  try {
+    const result = await doctoreaseService.registerToken({ apiBaseUrl, email, password, serverIp, expireDays });
+    currentSettings = settingsService.saveSettings({
+      his: {
+        hisSystem: 'doctorease',
+        apiBaseUrl: String(apiBaseUrl).trim(),
+        apiToken: result.token,
+        tokenServerIp: result.serverIp || serverIp,
+        tokenExpiresAt: result.expiresAt || '',
+      },
+    });
+    doctoreaseService.resetTracking();
+    res.json({ success: true, settings: maskSecrets(currentSettings), expiresAt: result.expiresAt });
+  } catch (err) {
+    console.error('[DoctorEase] ---> ขอ token ไม่สำเร็จ:', err.message);
+    res.json({ success: false, ...db.friendlyErrorCode(err) });
+  }
+});
+
 app.post('/api/settings', async (req, res) => {
   try {
     const { his, mwl } = req.body;
@@ -841,6 +884,45 @@ app.post('/api/settings', async (req, res) => {
     res.status(500).json({ success: false, messageKey: 'saveFailed', error: err.message });
   }
 });
+
+// เช็คว่าตั้งค่าแหล่งข้อมูล HIS ครบพอจะดึงข้อมูลได้หรือยัง
+function isHisConfigured(his) {
+  if (!his || !his.hisSystem) return false;
+  if (his.hisSystem === 'doctorease') return doctoreaseService.isConfigured(his);
+  return Boolean(his.host && his.database);
+}
+
+// ดึงรายการตรวจจาก HIS ตามระบบที่ตั้งไว้ ได้ออกมาเป็น record รูปแบบเดียวกันทุกระบบ
+// DoctorEase ได้แค่นัดของวันนี้ ค่า dateback และคำค้นจึงไม่มีผล
+async function fetchHisRecords(options) {
+  const his = currentSettings.his;
+  if (his.hisSystem === 'doctorease') {
+    return doctoreaseService.fetchTodayRecords(his);
+  }
+
+  const { sql, params } = buildXrayReportQuery(
+    options.dateback, options.include, options.exclude, options.confirm,
+    options.existingXNs || [], options.xns_NN || [], options.xns_YN || [], options.xns_NY || [],
+    his.dbType,
+    his.hisSystem,
+    options.xns_NN_accepted || []
+  );
+  const result = await db.query(sql, params);
+  const records = his.hisSystem === 'hl7'
+    ? mapHl7RowsToRecords(result.rows, his.encoding)
+    : result.rows;
+  await applyModalityMapping(records);
+  return records;
+}
+
+// นัดที่หายไปจากรายการของ DoctorEase เช่นถูกยกเลิก ให้ลบไฟล์ worklist ทิ้ง
+function removeCancelledDoctoreaseWorklists(records) {
+  if (currentSettings.his.hisSystem !== 'doctorease') return;
+  doctoreaseService.takeRemovedXns(records).forEach((xn) => {
+    console.log(`[DoctorEase] ---> นัด XN: ${xn} ไม่อยู่ในรายการแล้ว ลบไฟล์ worklist`);
+    dicomService.deleteWorklistFile(xn);
+  });
+}
 
 let isProcessingXrayReport = false;
 
@@ -947,7 +1029,7 @@ async function runAutoWorklistCycle() {
 
   // ถ้ายังไม่ได้ตั้งค่าฐานข้อมูลให้หยุดทำงาน
   const hisConfig = currentSettings.his || {};
-  if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
+  if (!isHisConfigured(hisConfig)) {
     return;
   }
 
@@ -955,20 +1037,14 @@ async function runAutoWorklistCycle() {
 
   isAutoGenRunning = true;
   try {
-    const { sql, params } = buildXrayReportQuery(
-      cfg.dateback ?? 1,
-      cfg.include || '',
-      cfg.exclude || '',
-      cfg.confirm === true,
-      [], [], [], [], // ดึงข้อมูลทั้งหมดในช่วงวันเพื่อให้ไฟล์ .wl ตรงกับ DB เสมอไม่ว่าใครจะเปิดหน้าเว็บอยู่หรือไม่
-      currentSettings.his.dbType,
-      currentSettings.his.hisSystem
-    );
-    const result = await db.query(sql, params);
-    const records = currentSettings.his.hisSystem === 'hl7'
-      ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
-      : result.rows;
-    await applyModalityMapping(records);
+    // ดึงข้อมูลทั้งหมดในช่วงวันเพื่อให้ไฟล์ .wl ตรงกับ DB เสมอไม่ว่าใครจะเปิดหน้าเว็บอยู่หรือไม่
+    const records = await fetchHisRecords({
+      dateback: cfg.dateback ?? 1,
+      include: cfg.include || '',
+      exclude: cfg.exclude || '',
+      confirm: cfg.confirm === true,
+    });
+    removeCancelledDoctoreaseWorklists(records);
     if (records.length > 0) {
       await processWorklistFiles(records, currentSettings.mwl.lang);
     }
@@ -999,8 +1075,8 @@ app.post('/api/xray-report', async (req, res) => {
   }
 
   const hisConfig = currentSettings.his || {};
-  if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
-    return res.status(400).json({ success: false, errorCode: 'DB_NOT_CONFIGURED' });
+  if (!isHisConfigured(hisConfig)) {
+    return res.status(400).json({ success: false, errorCode: hisConfig.hisSystem === 'doctorease' ? 'DE_NOT_CONFIGURED' : 'DB_NOT_CONFIGURED' });
   }
 
   isProcessingXrayReport = true;
@@ -1008,19 +1084,11 @@ app.post('/api/xray-report', async (req, res) => {
     const { dateback = 1, include, exclude, confirm, existingXNs, xns_NN, xns_YN, xns_NY, xns_NN_accepted } = req.body;
     const confirmFlag = confirm === true || confirm === 'true' || confirm === '1';
 
-    const { sql, params } = buildXrayReportQuery(
-      dateback, include, exclude, confirmFlag,
-      existingXNs, xns_NN, xns_YN, xns_NY,
-      currentSettings.his.dbType,
-      currentSettings.his.hisSystem,
-      xns_NN_accepted
-    );
-
-    const result = await db.query(sql, params);
-    const records = currentSettings.his.hisSystem === 'hl7'
-      ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
-      : result.rows;
-    await applyModalityMapping(records);
+    const records = await fetchHisRecords({
+      dateback, include, exclude, confirm: confirmFlag,
+      existingXNs, xns_NN, xns_YN, xns_NY, xns_NN_accepted,
+    });
+    removeCancelledDoctoreaseWorklists(records);
 
     records.forEach((record) => {
       record.lang = displayLang;
@@ -1058,8 +1126,8 @@ app.post('/api/xray-report/confirm-read-film', (req, res) => {
 // api สำหรับดึงข้อมูล 
 app.get('/api/worklist', async (req, res) => {
   const hisConfig = currentSettings.his || {};
-  if (!hisConfig.hisSystem || !hisConfig.host || !hisConfig.database) {
-    return res.status(400).json({ success: false, errorCode: 'DB_NOT_CONFIGURED' });
+  if (!isHisConfigured(hisConfig)) {
+    return res.status(400).json({ success: false, errorCode: hisConfig.hisSystem === 'doctorease' ? 'DE_NOT_CONFIGURED' : 'DB_NOT_CONFIGURED' });
   }
 
   try {
@@ -1071,18 +1139,7 @@ app.get('/api/worklist', async (req, res) => {
     const { include, exclude } = req.query;
     const confirmFlag = req.query.confirm === 'true' || req.query.confirm === '1';
 
-    const { sql, params } = buildXrayReportQuery(
-      dateback, include, exclude, confirmFlag,
-      [], [], [], [],
-      currentSettings.his.dbType,
-      currentSettings.his.hisSystem
-    );
-
-    const result = await db.query(sql, params);
-    const records = currentSettings.his.hisSystem === 'hl7'
-      ? mapHl7RowsToRecords(result.rows, currentSettings.his.encoding)
-      : result.rows;
-    await applyModalityMapping(records);
+    const records = await fetchHisRecords({ dateback, include, exclude, confirm: confirmFlag });
 
     records.forEach((record) => {
       if (record.confirm_read_film !== 'Y' && dicomService.isLocallyConfirmed(record.xn)) {

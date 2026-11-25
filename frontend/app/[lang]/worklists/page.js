@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatNameField, formatPrefixField, formatDoctorField } from '../../lib/nameDisplay';
 import { getDictionary, formatDbError } from '../../lib/i18n';
+import { getTokenExpiryWarning } from '../../lib/tokenExpiry';
 
 // pg ส่ง date มาเป็น Date แล้ว JSON แปลงเป็น ISO แบบ UTC (เวลาไทยจะถอยไป 1 วัน) - แปลงกลับเป็นวันที่ตามเวลาเครื่องผู้ใช้
 function formatAcceptDate(value) {
@@ -60,15 +61,21 @@ export default function Page() {
   const [confirmingXn, setConfirmingXn] = useState(null);
   const [showNamePrefix, setShowNamePrefix] = useState(true);
   const [showAccepted, setShowAccepted] = useState(false);
+  // ตอนใช้ DoctorEase ซ่อนคอลัมน์ที่ไม่มีข้อมูล และซ่อนเลขบัตรประชาชนตามเรื่อง PDPA
+  const [isDoctorease, setIsDoctorease] = useState(false);
+  const [tokenWarning, setTokenWarning] = useState('');
 
   useEffect(() => {
     fetch(`/api/settings`)
       .then((res) => res.json())
       .then((json) => {
         if (json.success) {
-          setShowNamePrefix(json.settings.mwl.showNamePrefix !== false);
+          // DoctorEase ไม่มีคำนำหน้าชื่อ จึงไม่แสดงคอลัมน์นี้
+          setShowNamePrefix(json.settings.mwl.showNamePrefix !== false && json.settings.his?.hisSystem !== 'doctorease');
           // คอลัมน์ "รับตัว" แสดงเฉพาะ HOSxP ที่เปิด requireAccept (สร้าง .wl ต่อเมื่อรับตัวแล้ว)
           setShowAccepted(json.settings.his?.hisSystem === 'hosxp' && json.settings.mwl.autoGenerate?.requireAccept === true);
+          setTokenWarning(getTokenExpiryWarning(fullDict, json.settings.his));
+          setIsDoctorease(json.settings.his?.hisSystem === 'doctorease');
         }
       })
       .catch(() => {});
@@ -303,6 +310,7 @@ export default function Page() {
         <button onClick={() => loadData(true)}>{dict.searchButton}</button>
       </div>
 
+      {tokenWarning && <div className="status status-error">{tokenWarning}</div>}
       <div className="status">{status}</div>
 
       <div className="table-wrap">
@@ -311,23 +319,23 @@ export default function Page() {
             <tr>
               <th>XN</th>
               <th>HN</th>
-              <th>CID</th>
+              {!isDoctorease && <th>CID</th>}
               {showNamePrefix && <th>{dict.table.prefix}</th>}
               <th>{dict.table.firstName}</th>
               <th>{dict.table.lastName}</th>
               <th>{dict.table.birthday}</th>
-              <th>{dict.table.sex}</th>
-              <th>{dict.table.xrayList}</th>
+              {!isDoctorease && <th>{dict.table.sex}</th>}
+              {!isDoctorease && <th>{dict.table.xrayList}</th>}
               <th>{dict.table.studyDate}</th>
               <th>{dict.table.studyTime}</th>
-              <th>{dict.table.group}</th>
-              <th>{dict.table.modality}</th>
+              {!isDoctorease && <th>{dict.table.group}</th>}
+              {!isDoctorease && <th>{dict.table.modality}</th>}
               {showAccepted && <th>{dict.table.accepted}</th>}
-              <th>{dict.table.confirmResult}</th>
+              {!isDoctorease && <th>{dict.table.confirmResult}</th>}
               <th>{dict.table.confirmFilm}</th>
-              <th>{dict.table.doctor}</th>
-              <th>{dict.table.itemCode}</th>
-              <th>{dict.table.department}</th>
+              {!isDoctorease && <th>{dict.table.doctor}</th>}
+              {!isDoctorease && <th>{dict.table.itemCode}</th>}
+              {!isDoctorease && <th>{dict.table.department}</th>}
               <th>{dict.table.action}</th>
             </tr>
           </thead>
@@ -338,27 +346,27 @@ export default function Page() {
               <tr key={row.xn}>
                 <td>{row.xn ?? ''}</td>
                 <td>{row.hn ?? ''}</td>
-                <td>{row.cid ?? ''}</td>
+                {!isDoctorease && <td>{row.cid ?? ''}</td>}
                 {showNamePrefix && <td>{formatPrefixField(row.pname, lang)}</td>}
                 <td>{formatNameField(row.fname, lang)}</td>
                 <td>{formatNameField(row.lname, lang)}</td>
                 <td>{row.birthday ?? ''}</td>
-                <td>{row.sex ?? ''}</td>
-                <td>{row.xraylist ?? ''}</td>
+                {!isDoctorease && <td>{row.sex ?? ''}</td>}
+                {!isDoctorease && <td>{row.xraylist ?? ''}</td>}
                 <td>{row.StudyDate ?? ''}</td>
                 <td>{row.StudyTime ?? ''}</td>
-                <td>{row.xray_items_group ?? ''}</td>
-                <td>{row.Modality ?? ''}</td>
+                {!isDoctorease && <td>{row.xray_items_group ?? ''}</td>}
+                {!isDoctorease && <td>{row.Modality ?? ''}</td>}
                 {showAccepted && (
                   <td title={row.accepted === 'Y' ? `${formatAcceptDate(row.accept_date)} ${row.accept_time ?? ''}`.trim() : ''}>
                     {row.accepted ?? ''}
                   </td>
                 )}
-                <td>{row.confirm ?? ''}</td>
+                {!isDoctorease && <td>{row.confirm ?? ''}</td>}
                 <td>{isFilmConfirmed ? 'Y' : (row.confirm_read_film ?? '')}</td>
-                <td>{formatDoctorField(row.Doctor, lang)}</td>
-                <td>{row.xray_items_code ?? ''}</td>
-                <td>{row.department_name ?? ''}</td>
+                {!isDoctorease && <td>{formatDoctorField(row.Doctor, lang)}</td>}
+                {!isDoctorease && <td>{row.xray_items_code ?? ''}</td>}
+                {!isDoctorease && <td>{row.department_name ?? ''}</td>}
                 <td>
                   {isFilmConfirmed ? (
                     dict.confirmFilmDone
