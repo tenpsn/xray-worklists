@@ -85,6 +85,8 @@ function mapRowToRecord(row) {
     birthday: row.Birthday || '',
     StudyDate: row.service_date || '',
     StudyTime: row.service_time || '',
+    // เครื่องที่ ICOH เป็นเครื่อง X-ray ฟัน
+    Modality: 'IO',
     branch_code: row.branch_code || '',
     confirm: 'N',
     confirm_read_film: 'N',
