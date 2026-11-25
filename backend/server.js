@@ -260,7 +260,7 @@ async function applySettings(settings, options = {}) {
     doctoreaseService.resetTracking();
     if (doctoreaseService.isConfigured(hisConfig)) {
       try {
-        await doctoreaseService.fetchTodayRecords(hisConfig);
+        await fetchDoctoreaseRecords();
       } catch (err) {
         console.error('[Settings] ---> เรียก DoctorEase API ไม่สำเร็จ:', err.message);
         dbError = err;
@@ -810,14 +810,15 @@ app.post('/api/settings/detect-his-system', async (req, res) => {
   }
 });
 
-// ขอ token จาก DoctorEase แล้วเก็บไว้ในการตั้งค่า ไม่เก็บรหัสผ่าน
+// ขอ token จาก DoctorEase ถ้าติ๊กจำรหัสผ่านไว้ ระบบจะขอ token ใหม่เองเมื่อใกล้หมดอายุ
 app.post('/api/settings/doctorease/register', async (req, res) => {
-  const { apiBaseUrl, email, password, serverIp, expireDays } = req.body || {};
+  const { apiBaseUrl, email, password, serverIp, expireDays, autoRenewToken } = req.body || {};
   if (!apiBaseUrl || !email || !password || !serverIp) {
     return res.status(400).json({ success: false, errorCode: 'DE_REGISTER_FIELDS_REQUIRED' });
   }
   try {
     const result = await doctoreaseService.registerToken({ apiBaseUrl, email, password, serverIp, expireDays });
+    const remember = autoRenewToken === true;
     currentSettings = settingsService.saveSettings({
       his: {
         hisSystem: 'doctorease',
@@ -825,6 +826,11 @@ app.post('/api/settings/doctorease/register', async (req, res) => {
         apiToken: result.token,
         tokenServerIp: result.serverIp || serverIp,
         tokenExpiresAt: result.expiresAt || '',
+        tokenRenewFailedAt: '',
+        autoRenewToken: remember,
+        apiEmail: remember ? String(email).trim() : '',
+        apiPassword: remember ? password : '',
+        tokenExpireDays: remember && expireDays ? String(expireDays) : '',
       },
     });
     doctoreaseService.resetTracking();
@@ -839,6 +845,10 @@ app.post('/api/settings', async (req, res) => {
   try {
     const { his, mwl } = req.body;
     const reconciledHis = reconcileSecrets(his, currentSettings.his);
+    // ค่า token เปลี่ยนได้จากการขอ token เท่านั้น กันหน้าเว็บส่งค่าเก่ามาทับ
+    DOCTOREASE_TOKEN_FIELDS.forEach((field) => {
+      if (reconciledHis && field in currentSettings.his) reconciledHis[field] = currentSettings.his[field];
+    });
     const reconciledMwl = reconcileSecrets(mwl, currentSettings.mwl);
 
     currentSettings = settingsService.saveSettings({ his: reconciledHis, mwl: reconciledMwl });
@@ -892,12 +902,36 @@ function isHisConfigured(his) {
   return Boolean(his.host && his.database);
 }
 
+const DOCTOREASE_TOKEN_FIELDS = [
+  'apiToken', 'tokenServerIp', 'tokenExpiresAt', 'tokenRenewFailedAt',
+  'autoRenewToken', 'apiEmail', 'apiPassword', 'tokenExpireDays',
+];
+
+// ดึงนัดจาก DoctorEase และเก็บ token ใหม่ทุกครั้งที่ระบบขอให้เอง
+function fetchDoctoreaseRecords() {
+  return doctoreaseService.fetchTodayRecordsAutoRenew(() => currentSettings.his, saveRenewedToken);
+}
+
+// จดเวลาที่ขอไม่สำเร็จครั้งแรกไว้ให้หน้าเว็บเตือน ขอได้เมื่อไรก็ล้างทิ้ง
+function saveRenewedToken(result, err) {
+  if (err) {
+    console.error('[DoctorEase] ---> ขอ token ใหม่อัตโนมัติไม่สำเร็จ:', err.errorCode || err.message);
+    if (!currentSettings.his.tokenRenewFailedAt) {
+      currentSettings = settingsService.saveSettings({ his: { tokenRenewFailedAt: new Date().toISOString() } });
+    }
+    return;
+  }
+  currentSettings = settingsService.saveSettings({
+    his: { apiToken: result.token, tokenExpiresAt: result.expiresAt || '', tokenRenewFailedAt: '' },
+  });
+}
+
 // ดึงรายการตรวจจาก HIS ตามระบบที่ตั้งไว้ ได้ออกมาเป็น record รูปแบบเดียวกันทุกระบบ
 // DoctorEase ได้แค่นัดของวันนี้ ค่า dateback และคำค้นจึงไม่มีผล
 async function fetchHisRecords(options) {
   const his = currentSettings.his;
   if (his.hisSystem === 'doctorease') {
-    return doctoreaseService.fetchTodayRecords(his);
+    return fetchDoctoreaseRecords();
   }
 
   const { sql, params } = buildXrayReportQuery(

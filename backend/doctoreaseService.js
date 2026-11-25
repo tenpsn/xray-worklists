@@ -3,6 +3,12 @@
 
 const REQUEST_TIMEOUT_MS = 10000;
 const ACCESSION_MAX_LENGTH = 16;
+// DoctorEase ล็อก token ไว้ 5 นาที จึงขอใหม่ก่อนหมดราว 1 นาที
+const TOKEN_RENEW_AFTER_MS = 4 * 60 * 1000;
+
+// เวลาที่ได้ token ล่าสุด นับด้วยนาฬิกาเครื่องนี้เอง ไม่ใช้ expires_at
+let tokenObtainedAt = 0;
+let renewInFlight = null;
 
 // เก็บ XN ที่ได้จากรอบก่อน ไว้หาว่านัดไหนหายไปจากรายการ
 let previousXns = new Set();
@@ -61,6 +67,7 @@ async function registerToken({ apiBaseUrl, email, password, serverIp, expireDays
   if (response.status !== 201 || !json.token) {
     throw createApiError(errorCodeFromStatus(response.status, true), json.message);
   }
+  tokenObtainedAt = Date.now();
   return { token: json.token, serverIp: json.server_ip, expiresAt: json.expires_at };
 }
 
@@ -111,6 +118,59 @@ async function fetchTodayRecords(his) {
     .map(mapRowToRecord);
 }
 
+function canAutoRenew(his) {
+  return Boolean(his && his.autoRenewToken && his.apiEmail && his.apiPassword && his.tokenServerIp);
+}
+
+// ขอ token ใหม่ด้วยรหัสที่จำไว้ ถ้ามีคนขอไปแล้วจะรอผลเดียวกัน
+// เพราะขอซ้อนกันจะทำให้ token ที่เพิ่งได้ถูกยกเลิก
+async function renewToken(getHis, onRenewed, usedToken) {
+  if (getHis().apiToken !== usedToken) return;
+  if (!renewInFlight) {
+    renewInFlight = (async () => {
+      const his = getHis();
+      try {
+        const result = await registerToken({
+          apiBaseUrl: his.apiBaseUrl,
+          email: his.apiEmail,
+          password: his.apiPassword,
+          serverIp: his.tokenServerIp,
+          expireDays: his.tokenExpireDays,
+        });
+        onRenewed(result, null);
+      } catch (err) {
+        onRenewed(null, err);
+        throw err;
+      }
+    })().finally(() => { renewInFlight = null; });
+  }
+  return renewInFlight;
+}
+
+// ดึงนัดวันนี้ ถ้าเปิดต่ออายุอัตโนมัติจะขอ token ใหม่เมื่อใกล้หมดหรือโดนปฏิเสธ
+async function fetchTodayRecordsAutoRenew(getHis, onRenewed) {
+  if (!canAutoRenew(getHis())) return fetchTodayRecords(getHis());
+
+  // หลังเปิดเครื่องใหม่จะไม่รู้อายุ token จึงรอให้โดนปฏิเสธก่อนค่อยขอใหม่
+  const isTokenOld = tokenObtainedAt > 0 && Date.now() - tokenObtainedAt >= TOKEN_RENEW_AFTER_MS;
+  if (getHis().apiToken && isTokenOld) {
+    // ขอใหม่ไม่ได้ก็ลองใช้ token เดิมต่อ เผื่อยังไม่หมดอายุ
+    await renewToken(getHis, onRenewed, getHis().apiToken).catch(() => {});
+  }
+  if (!getHis().apiToken) {
+    await renewToken(getHis, onRenewed, getHis().apiToken);
+  }
+
+  const usedToken = getHis().apiToken;
+  try {
+    return await fetchTodayRecords(getHis());
+  } catch (err) {
+    if (err.errorCode !== 'DE_TOKEN_INVALID') throw err;
+    await renewToken(getHis, onRenewed, usedToken);
+    return fetchTodayRecords(getHis());
+  }
+}
+
 // คืนรายการ XN ที่รอบก่อนมีแต่รอบนี้ไม่มีแล้ว เช่นนัดถูกยกเลิกหรือเลื่อนเวลา
 function takeRemovedXns(records) {
   const currentXns = new Set(records.map((r) => r.xn));
@@ -124,12 +184,14 @@ function resetTracking() {
 }
 
 function isConfigured(his) {
-  return Boolean(normalizeBaseUrl(his && his.apiBaseUrl) && his.apiToken);
+  return Boolean(normalizeBaseUrl(his && his.apiBaseUrl) && (his.apiToken || canAutoRenew(his)));
 }
 
 module.exports = {
   registerToken,
   fetchTodayRecords,
+  fetchTodayRecordsAutoRenew,
+  canAutoRenew,
   takeRemovedXns,
   resetTracking,
   isConfigured,

@@ -22,6 +22,12 @@ const DEFAULT_SETTINGS = {
     tokenServerIp: '',
     tokenExpiresAt: '',
     branchCode: '',
+    // จำอีเมลและรหัสผ่านไว้ขอ token ใหม่เอง
+    autoRenewToken: false,
+    apiEmail: '',
+    apiPassword: '',
+    tokenExpireDays: '',
+    tokenRenewFailedAt: '',
   },
   mwl: {
     lang: process.env.MWL_LANG === 'th' ? 'th' : 'en',

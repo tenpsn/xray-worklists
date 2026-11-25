@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatNameField, formatPrefixField, formatDoctorField } from '../../lib/nameDisplay';
 import { getDictionary, formatDbError } from '../../lib/i18n';
-import { getTokenExpiryWarning } from '../../lib/tokenExpiry';
+import { useTokenExpiryWarning } from '../../lib/tokenExpiry';
 
 // pg ส่ง date มาเป็น Date แล้ว JSON แปลงเป็น ISO แบบ UTC (เวลาไทยจะถอยไป 1 วัน) - แปลงกลับเป็นวันที่ตามเวลาเครื่องผู้ใช้
 function formatAcceptDate(value) {
@@ -63,9 +63,17 @@ export default function Page() {
   const [showAccepted, setShowAccepted] = useState(false);
   // ตอนใช้ DoctorEase ซ่อนคอลัมน์ที่ไม่มีข้อมูล และซ่อนเลขบัตรประชาชนตามเรื่อง PDPA
   const [isDoctorease, setIsDoctorease] = useState(false);
-  const [tokenWarning, setTokenWarning] = useState('');
+  const [hisSettings, setHisSettings] = useState(null);
+  const tokenWarning = useTokenExpiryWarning(fullDict, hisSettings);
 
   useEffect(() => {
+    loadPageSettings();
+    // โหลดซ้ำทุกนาทีให้คำเตือน token ตรงกับสถานะล่าสุด
+    const timer = setInterval(loadPageSettings, 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  function loadPageSettings() {
     fetch(`/api/settings`)
       .then((res) => res.json())
       .then((json) => {
@@ -74,12 +82,12 @@ export default function Page() {
           setShowNamePrefix(json.settings.mwl.showNamePrefix !== false && json.settings.his?.hisSystem !== 'doctorease');
           // คอลัมน์ "รับตัว" แสดงเฉพาะ HOSxP ที่เปิด requireAccept (สร้าง .wl ต่อเมื่อรับตัวแล้ว)
           setShowAccepted(json.settings.his?.hisSystem === 'hosxp' && json.settings.mwl.autoGenerate?.requireAccept === true);
-          setTokenWarning(getTokenExpiryWarning(fullDict, json.settings.his));
+          setHisSettings(json.settings.his);
           setIsDoctorease(json.settings.his?.hisSystem === 'doctorease');
         }
       })
       .catch(() => {});
-  }, []);
+  }
 
   async function confirmReadFilm(xn) {
     setConfirmingXn(xn);

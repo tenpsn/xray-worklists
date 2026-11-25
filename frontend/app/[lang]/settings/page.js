@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getDictionary, formatDbError, formatSettingsMessage } from '../../lib/i18n';
-import { getTokenExpiryWarning } from '../../lib/tokenExpiry';
+import { useTokenExpiryWarning } from '../../lib/tokenExpiry';
 
 const DEFAULT_FORM = {
   his: {
@@ -21,6 +21,9 @@ const DEFAULT_FORM = {
     tokenServerIp: '',
     tokenExpiresAt: '',
     branchCode: '',
+    autoRenewToken: false,
+    apiEmail: '',
+    tokenRenewFailedAt: '',
   },
   mwl: {
     lang: '', // ภาษาเริ่มต้นสำหรับออเดอร์ที่รับผ่าน hl7
@@ -58,11 +61,11 @@ export default function SettingsPage() {
   const [worklistDirActive, setWorklistDirActive] = useState('');
   const [detecting, setDetecting] = useState(false);
 
-  // ข้อมูลที่ใช้ขอ token จาก DoctorEase ไม่บันทึกลงการตั้งค่า
-  const [registerForm, setRegisterForm] = useState({ email: '', password: '', serverIp: '', expireDays: '365' });
+  // ข้อมูลที่ใช้ขอ token จาก DoctorEase จะบันทึกก็ต่อเมื่อติ๊กจำรหัสผ่าน
+  const [registerForm, setRegisterForm] = useState({ email: '', password: '', serverIp: '', expireDays: '365', autoRenewToken: true });
   const [registering, setRegistering] = useState(false);
   const isDoctorease = form.his.hisSystem === 'doctorease';
-  const tokenWarning = getTokenExpiryWarning(fullDict, form.his);
+  const tokenWarning = useTokenExpiryWarning(fullDict, form.his);
 
   // รายชื่อ group/category จริงจาก HIS ที่ต่ออยู่ + modality ที่ระบบใช้อยู่ตอนนี้
   const [modalityGroups, setModalityGroups] = useState([]);
@@ -474,9 +477,11 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   readOnly
-                  value={form.his.apiToken
-                    ? `${dict.deTokenReady} ${form.his.tokenExpiresAt || ''} (IP ${form.his.tokenServerIp || '-'})`
-                    : dict.deTokenMissing}
+                  value={form.his.autoRenewToken
+                    ? `${dict.deTokenAutoRenew} (${form.his.apiEmail || '-'}, IP ${form.his.tokenServerIp || '-'})`
+                    : form.his.apiToken
+                      ? `${dict.deTokenReady} ${form.his.tokenExpiresAt || ''} (IP ${form.his.tokenServerIp || '-'})`
+                      : dict.deTokenMissing}
                 />
               </label>
             </>
@@ -529,6 +534,15 @@ export default function SettingsPage() {
                 />
               </label>
             </div>
+            <label className="checkbox-inline" style={{ marginTop: 12 }}>
+              <input
+                type="checkbox"
+                checked={registerForm.autoRenewToken}
+                onChange={(e) => updateRegisterForm('autoRenewToken', e.target.checked)}
+              />
+              {dict.deAutoRenewLabel}
+            </label>
+            <p className="field-note">{dict.deAutoRenewNote}</p>
             <p className="field-note">{dict.deRegisterNote}</p>
             <button
               type="button"

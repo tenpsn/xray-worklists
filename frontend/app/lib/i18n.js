@@ -3,6 +3,8 @@ const dictionaries = {
     tokenExpiry: {
       expiringSoon: (days, date) => `DoctorEase token expires in ${days} day(s) (${date}). Please request a new token on the Settings page.`,
       expired: (date) => `DoctorEase token expired on ${date}. Please request a new token on the Settings page.`,
+      expiringSoonTime: (hours, minutes, seconds, date) => `DoctorEase token expires in ${[hours && `${hours} hr`, (hours || minutes) && `${minutes} min`, `${seconds} sec`].filter(Boolean).join(' ')} (${date}). Please request a new token on the Settings page.`,
+      autoRenewFailed: (time) => `Automatic DoctorEase token renewal has been failing since ${time}. Check the email and password.`,
     },
     dbErrors: {
       HOST_NOT_FOUND: ({ hostname }) => `Hostname "${hostname}" not found. Please check the IP Address.`,
@@ -165,7 +167,10 @@ const dictionaries = {
       deEmailLabel: 'DoctorEase Email',
       deServerIpLabel: 'Server IP (public IP of this machine)',
       deExpireDaysLabel: 'Token valid (days)',
-      deRegisterNote: 'The password is used only to request a token and is not saved. Requesting again with the same Server IP revokes the old token.',
+      deRegisterNote: 'Requesting again with the same Server IP revokes the old token.',
+      deAutoRenewLabel: 'Remember password and renew the token automatically',
+      deAutoRenewNote: 'The email and password are saved on this server so the system can request a new token before the old one expires. If unticked, the password is not saved.',
+      deTokenAutoRenew: 'Renewed automatically',
       deRegisterButton: 'Request token',
       deRegisteringStatus: 'Requesting token...',
       deRegisterSuccess: 'Token received. Expires ',
@@ -287,6 +292,8 @@ const dictionaries = {
     tokenExpiry: {
       expiringSoon: (days, date) => `token ของ DoctorEase จะหมดอายุในอีก ${days} วัน (${date}) กรุณาขอ token ใหม่ที่หน้าตั้งค่า`,
       expired: (date) => `token ของ DoctorEase หมดอายุแล้วเมื่อ ${date} กรุณาขอ token ใหม่ที่หน้าตั้งค่า`,
+      expiringSoonTime: (hours, minutes, seconds, date) => `token ของ DoctorEase จะหมดอายุในอีก ${[hours && `${hours} ชั่วโมง`, (hours || minutes) && `${minutes} นาที`, `${seconds} วินาที`].filter(Boolean).join(' ')} (${date}) กรุณาขอ token ใหม่ที่หน้าตั้งค่า`,
+      autoRenewFailed: (time) => `ระบบขอ token ของ DoctorEase ใหม่เองไม่สำเร็จ ตั้งแต่ ${time} กรุณาตรวจสอบอีเมลและรหัสผ่าน`,
     },
     dbErrors: {
       HOST_NOT_FOUND: ({ hostname }) => `ไม่เจอ Hostname "${hostname}" กรุณาตรวจสอบ IP Address`,
@@ -449,7 +456,10 @@ const dictionaries = {
       deEmailLabel: 'Email ของ DoctorEase',
       deServerIpLabel: 'Server IP (IP สาธารณะของเครื่องนี้)',
       deExpireDaysLabel: 'อายุ token (วัน)',
-      deRegisterNote: 'รหัสผ่านใช้ขอ token ครั้งเดียว ไม่ถูกบันทึก ถ้าขอใหม่ด้วย Server IP เดิม token เก่าจะใช้ไม่ได้',
+      deRegisterNote: 'ถ้าขอใหม่ด้วย Server IP เดิม token เก่าจะใช้ไม่ได้',
+      deAutoRenewLabel: 'จำรหัสผ่านไว้ให้ระบบขอ token ใหม่เอง',
+      deAutoRenewNote: 'อีเมลและรหัสผ่านจะถูกเก็บไว้ในเครื่องนี้ เพื่อให้ระบบขอ token ใหม่ก่อนตัวเก่าหมดอายุ ถ้าไม่ติ๊กจะไม่เก็บรหัสผ่าน',
+      deTokenAutoRenew: 'ต่ออายุอัตโนมัติ',
       deRegisterButton: 'ขอ token',
       deRegisteringStatus: 'กำลังขอ token...',
       deRegisterSuccess: 'ได้ token แล้ว หมดอายุ ',
