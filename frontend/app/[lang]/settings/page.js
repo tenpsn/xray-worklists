@@ -20,7 +20,6 @@ const DEFAULT_FORM = {
     apiToken: '',
     tokenServerIp: '',
     tokenExpiresAt: '',
-    branchCode: '',
     autoRenewToken: false,
     apiEmail: '',
     tokenRenewFailedAt: '',
@@ -62,7 +61,7 @@ export default function SettingsPage() {
   const [detecting, setDetecting] = useState(false);
 
   // ข้อมูลที่ใช้ขอ token จาก DoctorEase จะบันทึกก็ต่อเมื่อติ๊กจำรหัสผ่าน
-  const [registerForm, setRegisterForm] = useState({ email: '', password: '', serverIp: '', expireDays: '365', autoRenewToken: true });
+  const [registerForm, setRegisterForm] = useState({ email: '', password: '', serverIp: '', autoRenewToken: true });
   const [registering, setRegistering] = useState(false);
   const isDoctorease = form.his.hisSystem === 'doctorease';
   const tokenWarning = useTokenExpiryWarning(fullDict, form.his);
@@ -463,16 +462,6 @@ export default function SettingsPage() {
               </label>
 
               <label>
-                {dict.deBranchCodeLabel}
-                <input
-                  type="text"
-                  placeholder={dict.deBranchCodePlaceholder}
-                  value={form.his.branchCode}
-                  onChange={(e) => updateHis('branchCode', e.target.value)}
-                />
-              </label>
-
-              <label>
                 {dict.deTokenStatusLabel}
                 <input
                   type="text"
@@ -522,19 +511,8 @@ export default function SettingsPage() {
                   onChange={(e) => updateRegisterForm('serverIp', e.target.value)}
                 />
               </label>
-
-              <label>
-                {dict.deExpireDaysLabel}
-                <input
-                  type="number"
-                  min="1"
-                  max="3650"
-                  value={registerForm.expireDays}
-                  onChange={(e) => updateRegisterForm('expireDays', e.target.value)}
-                />
-              </label>
             </div>
-            <label className="checkbox-inline" style={{ marginTop: 12 }}>
+            <label className="checkbox-inline" style={{ display: 'flex', marginTop: 12 }}>
               <input
                 type="checkbox"
                 checked={registerForm.autoRenewToken}
@@ -542,8 +520,6 @@ export default function SettingsPage() {
               />
               {dict.deAutoRenewLabel}
             </label>
-            <p className="field-note">{dict.deAutoRenewNote}</p>
-            <p className="field-note">{dict.deRegisterNote}</p>
             <button
               type="button"
               style={{ marginTop: 12 }}

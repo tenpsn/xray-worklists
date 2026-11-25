@@ -21,12 +21,10 @@ const DEFAULT_SETTINGS = {
     apiToken: '',
     tokenServerIp: '',
     tokenExpiresAt: '',
-    branchCode: '',
     // จำอีเมลและรหัสผ่านไว้ขอ token ใหม่เอง
     autoRenewToken: false,
     apiEmail: '',
     apiPassword: '',
-    tokenExpireDays: '',
     tokenRenewFailedAt: '',
   },
   mwl: {

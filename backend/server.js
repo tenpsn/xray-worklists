@@ -812,12 +812,12 @@ app.post('/api/settings/detect-his-system', async (req, res) => {
 
 // ขอ token จาก DoctorEase ถ้าติ๊กจำรหัสผ่านไว้ ระบบจะขอ token ใหม่เองเมื่อใกล้หมดอายุ
 app.post('/api/settings/doctorease/register', async (req, res) => {
-  const { apiBaseUrl, email, password, serverIp, expireDays, autoRenewToken } = req.body || {};
+  const { apiBaseUrl, email, password, serverIp, autoRenewToken } = req.body || {};
   if (!apiBaseUrl || !email || !password || !serverIp) {
     return res.status(400).json({ success: false, errorCode: 'DE_REGISTER_FIELDS_REQUIRED' });
   }
   try {
-    const result = await doctoreaseService.registerToken({ apiBaseUrl, email, password, serverIp, expireDays });
+    const result = await doctoreaseService.registerToken({ apiBaseUrl, email, password, serverIp });
     const remember = autoRenewToken === true;
     currentSettings = settingsService.saveSettings({
       his: {
@@ -830,7 +830,6 @@ app.post('/api/settings/doctorease/register', async (req, res) => {
         autoRenewToken: remember,
         apiEmail: remember ? String(email).trim() : '',
         apiPassword: remember ? password : '',
-        tokenExpireDays: remember && expireDays ? String(expireDays) : '',
       },
     });
     doctoreaseService.resetTracking();
@@ -904,7 +903,7 @@ function isHisConfigured(his) {
 
 const DOCTOREASE_TOKEN_FIELDS = [
   'apiToken', 'tokenServerIp', 'tokenExpiresAt', 'tokenRenewFailedAt',
-  'autoRenewToken', 'apiEmail', 'apiPassword', 'tokenExpireDays',
+  'autoRenewToken', 'apiEmail', 'apiPassword',
 ];
 
 // ดึงนัดจาก DoctorEase และเก็บ token ใหม่ทุกครั้งที่ระบบขอให้เอง

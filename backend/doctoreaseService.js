@@ -3,11 +3,6 @@
 
 const REQUEST_TIMEOUT_MS = 10000;
 const ACCESSION_MAX_LENGTH = 16;
-// DoctorEase ล็อก token ไว้ 5 นาที จึงขอใหม่ก่อนหมดราว 1 นาที
-const TOKEN_RENEW_AFTER_MS = 4 * 60 * 1000;
-
-// เวลาที่ได้ token ล่าสุด นับด้วยนาฬิกาเครื่องนี้เอง ไม่ใช้ expires_at
-let tokenObtainedAt = 0;
 let renewInFlight = null;
 
 // เก็บ XN ที่ได้จากรอบก่อน ไว้หาว่านัดไหนหายไปจากรายการ
@@ -50,12 +45,11 @@ function errorCodeFromStatus(status, isRegister) {
 }
 
 // ขอ token ใหม่ ถ้าเคยขอด้วยบัญชีและ IP เดิม token เก่าจะใช้ไม่ได้ทันที
-async function registerToken({ apiBaseUrl, email, password, serverIp, expireDays, name }) {
+async function registerToken({ apiBaseUrl, email, password, serverIp, name }) {
   const baseUrl = normalizeBaseUrl(apiBaseUrl);
   if (!baseUrl) throw createApiError('DE_NOT_CONFIGURED');
 
   const body = { email, password, server_ip: serverIp, name: name || 'xray-worklists' };
-  if (expireDays) body.expire_days = Number(expireDays);
 
   const response = await callApi(`${baseUrl}/api/register`, {
     method: 'POST',
@@ -67,7 +61,6 @@ async function registerToken({ apiBaseUrl, email, password, serverIp, expireDays
   if (response.status !== 201 || !json.token) {
     throw createApiError(errorCodeFromStatus(response.status, true), json.message);
   }
-  tokenObtainedAt = Date.now();
   return { token: json.token, serverIp: json.server_ip, expiresAt: json.expires_at };
 }
 
@@ -104,8 +97,7 @@ async function fetchTodayRecords(his) {
   const baseUrl = normalizeBaseUrl(his.apiBaseUrl);
   if (!baseUrl || !his.apiToken) throw createApiError('DE_NOT_CONFIGURED');
 
-  const query = his.branchCode ? `?branch_code=${encodeURIComponent(his.branchCode)}` : '';
-  const response = await callApi(`${baseUrl}/api/patients/today${query}`, {
+  const response = await callApi(`${baseUrl}/api/patients/today`, {
     headers: { Authorization: `Bearer ${his.apiToken}`, Accept: 'application/json' },
   });
   const json = await readJson(response);
@@ -135,7 +127,6 @@ async function renewToken(getHis, onRenewed, usedToken) {
           email: his.apiEmail,
           password: his.apiPassword,
           serverIp: his.tokenServerIp,
-          expireDays: his.tokenExpireDays,
         });
         onRenewed(result, null);
       } catch (err) {
@@ -147,16 +138,10 @@ async function renewToken(getHis, onRenewed, usedToken) {
   return renewInFlight;
 }
 
-// ดึงนัดวันนี้ ถ้าเปิดต่ออายุอัตโนมัติจะขอ token ใหม่เมื่อใกล้หมดหรือโดนปฏิเสธ
+// ดึงนัดวันนี้ ถ้าเปิดต่ออายุอัตโนมัติจะรอให้ token หมดอายุก่อนแล้วค่อยขอใหม่
 async function fetchTodayRecordsAutoRenew(getHis, onRenewed) {
   if (!canAutoRenew(getHis())) return fetchTodayRecords(getHis());
 
-  // หลังเปิดเครื่องใหม่จะไม่รู้อายุ token จึงรอให้โดนปฏิเสธก่อนค่อยขอใหม่
-  const isTokenOld = tokenObtainedAt > 0 && Date.now() - tokenObtainedAt >= TOKEN_RENEW_AFTER_MS;
-  if (getHis().apiToken && isTokenOld) {
-    // ขอใหม่ไม่ได้ก็ลองใช้ token เดิมต่อ เผื่อยังไม่หมดอายุ
-    await renewToken(getHis, onRenewed, getHis().apiToken).catch(() => {});
-  }
   if (!getHis().apiToken) {
     await renewToken(getHis, onRenewed, getHis().apiToken);
   }
