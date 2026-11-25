@@ -14,6 +14,6 @@
   "DefaultEncoding": "Utf8",
   "Worklists": {
     "Enable": true,
-    "Database": "/mnt/hostD/xray-worklists/backend/worklists"
+    "Database": "/mnt/hostRoot/Users/ch.nattapong/Gd4/xray-worklists/backend/worklists"
   }
 }
