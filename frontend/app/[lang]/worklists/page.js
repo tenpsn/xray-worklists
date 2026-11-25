@@ -329,7 +329,7 @@ export default function Page() {
               <th>{dict.table.studyDate}</th>
               <th>{dict.table.studyTime}</th>
               {!isDoctorease && <th>{dict.table.group}</th>}
-              {!isDoctorease && <th>{dict.table.modality}</th>}
+              <th>{dict.table.modality}</th>
               {showAccepted && <th>{dict.table.accepted}</th>}
               {!isDoctorease && <th>{dict.table.confirmResult}</th>}
               <th>{dict.table.confirmFilm}</th>
@@ -356,7 +356,7 @@ export default function Page() {
                 <td>{row.StudyDate ?? ''}</td>
                 <td>{row.StudyTime ?? ''}</td>
                 {!isDoctorease && <td>{row.xray_items_group ?? ''}</td>}
-                {!isDoctorease && <td>{row.Modality ?? ''}</td>}
+                <td>{row.Modality ?? ''}</td>
                 {showAccepted && (
                   <td title={row.accepted === 'Y' ? `${formatAcceptDate(row.accept_date)} ${row.accept_time ?? ''}`.trim() : ''}>
                     {row.accepted ?? ''}
