@@ -77,7 +77,8 @@ function buildXn(row) {
 function mapRowToRecord(row) {
   return {
     xn: buildXn(row),
-    hn: String(row.HN || '').trim(),
+    // ใช้เลขบัตรประชาชนหรือพาสปอร์ตเป็น HN
+    hn: String(row.ID_Card || row.HN || '').trim(),
     cid: row.ID_Card || '',
     fname: row.Firstname || '',
     lname: row.Lastname || '',
