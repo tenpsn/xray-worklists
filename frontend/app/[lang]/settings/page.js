@@ -368,6 +368,8 @@ export default function SettingsPage() {
 
       // เข้ามาที่หน้านี้แล้วกด Save ถือว่าเลือกภาษาเว็บแน่ชัดแล้ว (เผื่อมาจาก bookmark เก่าที่ข้ามหน้าเลือกภาษาไป)
       const payload = { ...form, mwl: { ...form.mwl, uiLangConfirmed: true, modalityPorts } };
+      // เอาติ๊กจำรหัสผ่านออกตอนที่ระบบขอ token เองอยู่ ให้เลิกขอเอง
+      payload.stopAutoRenew = isDoctorease && form.his.autoRenewToken === true && !registerForm.autoRenewToken;
       const res = await fetch(`/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -383,6 +385,9 @@ export default function SettingsPage() {
         setStatus(formatSettingsMessage(fullDict, json.messageKey, json.warningText));
       }
       setStatusType(json.success ? 'success' : 'error');
+      if (json.settings) {
+        setForm((prev) => ({ ...prev, his: { ...prev.his, ...json.settings.his } }));
+      }
 
       // ดึงรายการกลุ่ม modality ใหม่ให้ตรงกับ HIS
       if (json.success) {

@@ -842,12 +842,16 @@ app.post('/api/settings/doctorease/register', async (req, res) => {
 
 app.post('/api/settings', async (req, res) => {
   try {
-    const { his, mwl } = req.body;
+    const { his, mwl, stopAutoRenew } = req.body;
     const reconciledHis = reconcileSecrets(his, currentSettings.his);
     // ค่า token เปลี่ยนได้จากการขอ token เท่านั้น กันหน้าเว็บส่งค่าเก่ามาทับ
     DOCTOREASE_TOKEN_FIELDS.forEach((field) => {
       if (reconciledHis && field in currentSettings.his) reconciledHis[field] = currentSettings.his[field];
     });
+    // เอาติ๊กจำรหัสผ่านออกแล้วกดบันทึก ให้เลิกขอ token เองและลบรหัสผ่านทิ้ง
+    if (reconciledHis && stopAutoRenew === true) {
+      Object.assign(reconciledHis, { autoRenewToken: false, apiEmail: '', apiPassword: '', tokenRenewFailedAt: '' });
+    }
     const reconciledMwl = reconcileSecrets(mwl, currentSettings.mwl);
 
     currentSettings = settingsService.saveSettings({ his: reconciledHis, mwl: reconciledMwl });
